@@ -1,0 +1,6 @@
+.env
+data/raw/
+data/chunks/
+data/chromadb/
+__pycache__/
+*.pyc
