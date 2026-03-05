@@ -156,6 +156,29 @@ class KnowledgeStore:
 
         return [{**point.payload, "score": 0.0} for point in results]
 
+    def fetch_by_chunk_ids(self, chunk_ids: list[str], limit: int = 50) -> list[dict]:
+        """Fetch chunks by their chunk_id field using Qdrant scroll with MatchAny."""
+        if not chunk_ids:
+            return []
+        client = self._get_client()
+        try:
+            info = client.get_collection(QDRANT_COLLECTION)
+            if info.points_count == 0:
+                return []
+        except Exception:
+            return []
+
+        results = client.scroll(
+            collection_name=QDRANT_COLLECTION,
+            scroll_filter=Filter(must=[
+                FieldCondition(key="chunk_id", match=MatchAny(any=chunk_ids)),
+            ]),
+            limit=limit,
+            with_payload=True,
+        )[0]
+
+        return [{**point.payload, "score": 0.0} for point in results]
+
     def _build_filter(self, doc_ids=None, dieu=None) -> Filter | None:
         conditions = []
         if doc_ids:
