@@ -2,5 +2,6 @@
 data/raw/
 data/chunks/
 data/chromadb/
+data/chat.db
 __pycache__/
 *.pyc

@@ -31,6 +31,29 @@ WAIT_BETWEEN_BATCHES = 4
 
 import re
 
+DOC_ID_MAP = {
+    "luat dat dai": "ldd2024",
+    "102": "nd102",
+    "103": "nd103",
+    "151": "nd151",
+    "226": "nd226",
+    "254": "nq254",
+    "49": "nd49",
+    "71": "nd71",
+    "88": "nd88",
+    "12": "nd12",
+    "50": "nd50",
+}
+
+
+def _to_doc_id(doc_name: str) -> str:
+    name_lower = doc_name.lower()
+    for key, doc_id in DOC_ID_MAP.items():
+        if key in name_lower:
+            return doc_id
+    return name_lower.replace(" ", "_")[:20]
+
+
 def tokenize_vi(text: str) -> list[str]:
     text = text.lower()
     text = re.sub(r"[^\w\sàáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]", " ", text)
@@ -140,6 +163,11 @@ def main():
         field_name="dieu",
         field_schema=PayloadSchemaType.KEYWORD,
     )
+    client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="doc_id",
+        field_schema=PayloadSchemaType.KEYWORD,
+    )
 
     # Index in batches
     total_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
@@ -202,11 +230,13 @@ def main():
                 payload={
                     "text": chunk.get("content", ""),
                     "doc_name": chunk.get("doc_name", ""),
+                    "doc_id": _to_doc_id(chunk.get("doc_name", "")),
                     "chapter": chunk.get("chapter", ""),
                     "dieu": chunk.get("dieu", ""),
                     "dieu_title": chunk.get("dieu_title", ""),
                     "khoan": chunk.get("khoan", ""),
                     "metadata_str": chunk.get("metadata_str", ""),
+                    "chunk_id": chunk.get("chunk_id", i),
                 },
             ))
 
@@ -218,7 +248,7 @@ def main():
             time.sleep(WAIT_BETWEEN_BATCHES)
 
     info = client.get_collection(COLLECTION_NAME)
-    print(f"\nHoan thanh! {info.points_count} points trong Qdrant tai: {QDRANT_PATH}")
+    print(f"\nHoan thanh! {info.points_count} points trong Qdrant tai: {qdrant_url}")
 
 
 if __name__ == "__main__":

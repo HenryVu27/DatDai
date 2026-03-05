@@ -1,5 +1,12 @@
 """FastAPI server for the land law chatbot."""
+import logging
 import os
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles

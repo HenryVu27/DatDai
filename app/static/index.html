@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tu Van Luat Dat Dai</title>
+<title>Tư Vấn Luật Đất Đai</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Be+Vietnam+Pro:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -430,15 +430,15 @@ body { display: flex; }
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
       </svg>
-      Luat Dat Dai
+      Luật Đất Đai
     </div>
     <button id="new-chat-btn" onclick="newChat()">
       <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      Cuoc hoi thoai moi
+      Cuộc hội thoại mới
     </button>
   </div>
   <div class="sessions-list" id="sessions-list"></div>
-  <div class="sidebar-footer">Luat Dat Dai 2024 &amp; Nghi dinh huong dan</div>
+  <div class="sidebar-footer">Luật Đất Đai 2024 &amp; Nghị định hướng dẫn</div>
 </nav>
 
 <div class="mobile-overlay" id="mobile-overlay" onclick="toggleSidebar()"></div>
@@ -449,7 +449,7 @@ body { display: flex; }
     <button id="toggle-sidebar" onclick="toggleSidebar()">
       <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <div id="topbar-title">Cuoc hoi thoai moi</div>
+    <div id="topbar-title">Cuộc hội thoại mới</div>
   </div>
 
   <div id="chat-area">
@@ -460,21 +460,21 @@ body { display: flex; }
           <path d="M8 7h6"/><path d="M8 11h8"/>
         </svg>
       </div>
-      <h2>Tu van Luat Dat Dai</h2>
-      <p>Hoi bat ky cau hoi nao ve Luat Dat Dai 2024, cac nghi dinh huong dan, thu tuc dat dai. Toi se trich dan cu the dieu khoan cho ban.</p>
+      <h2>Tư vấn Luật Đất Đai</h2>
+      <p>Hỏi bất kỳ câu hỏi nào về Luật Đất Đai 2024, các nghị định hướng dẫn, thủ tục đất đai. Tôi sẽ trích dẫn cụ thể điều khoản cho bạn.</p>
       <div class="suggestions">
-        <button class="suggestion" onclick="askSuggestion(this)">Dieu kien de duoc cap giay chung nhan quyen su dung dat?</button>
-        <button class="suggestion" onclick="askSuggestion(this)">Thu tuc thu hoi dat de thuc hien du an nhu the nao?</button>
-        <button class="suggestion" onclick="askSuggestion(this)">Quyen va nghia vu cua nguoi su dung dat la gi?</button>
-        <button class="suggestion" onclick="askSuggestion(this)">Cach tinh tien su dung dat khi duoc giao dat?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Điều kiện để được cấp giấy chứng nhận quyền sử dụng đất?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Thủ tục thu hồi đất để thực hiện dự án như thế nào?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Quyền và nghĩa vụ của người sử dụng đất là gì?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Cách tính tiền sử dụng đất khi được giao đất?</button>
       </div>
     </div>
   </div>
 
   <div id="input-area">
     <form id="input-form" onsubmit="handleSubmit(event)">
-      <textarea id="question-input" placeholder="Hoi ve luat dat dai..." rows="1" autofocus></textarea>
-      <button type="submit" id="send-btn" title="Gui cau hoi">
+      <textarea id="question-input" placeholder="Hỏi về luật đất đai..." rows="1" autofocus></textarea>
+      <button type="submit" id="send-btn" title="Gửi câu hỏi">
         <svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
       </button>
     </form>
@@ -511,8 +511,8 @@ async function loadSessions() {
     sessions.forEach(s => {
       const div = document.createElement('div');
       div.className = 'session-item' + (s.id === currentSessionId ? ' active' : '');
-      div.textContent = s.title || s.first_message || 'Cuoc hoi thoai moi';
-      div.onclick = () => switchSession(s.id, s.title || s.first_message || 'Cuoc hoi thoai moi');
+      div.textContent = s.title || s.first_message || 'Cuộc hội thoại mới';
+      div.onclick = () => switchSession(s.id, s.title || s.first_message || 'Cuộc hội thoại mới');
       sessionsList.appendChild(div);
     });
   } catch(e) {}
@@ -544,7 +544,7 @@ async function switchSession(id, title) {
 
 async function newChat() {
   currentSessionId = null;
-  topbarTitle.textContent = 'Cuoc hoi thoai moi';
+  topbarTitle.textContent = 'Cuộc hội thoại mới';
   chatArea.innerHTML = `
     <div class="welcome" id="welcome">
       <div class="welcome-icon">
@@ -553,13 +553,13 @@ async function newChat() {
           <path d="M8 7h6"/><path d="M8 11h8"/>
         </svg>
       </div>
-      <h2>Tu van Luat Dat Dai</h2>
-      <p>Hoi bat ky cau hoi nao ve Luat Dat Dai 2024, cac nghi dinh huong dan, thu tuc dat dai. Toi se trich dan cu the dieu khoan cho ban.</p>
+      <h2>Tư vấn Luật Đất Đai</h2>
+      <p>Hỏi bất kỳ câu hỏi nào về Luật Đất Đai 2024, các nghị định hướng dẫn, thủ tục đất đai. Tôi sẽ trích dẫn cụ thể điều khoản cho bạn.</p>
       <div class="suggestions">
-        <button class="suggestion" onclick="askSuggestion(this)">Dieu kien de duoc cap giay chung nhan quyen su dung dat?</button>
-        <button class="suggestion" onclick="askSuggestion(this)">Thu tuc thu hoi dat de thuc hien du an nhu the nao?</button>
-        <button class="suggestion" onclick="askSuggestion(this)">Quyen va nghia vu cua nguoi su dung dat la gi?</button>
-        <button class="suggestion" onclick="askSuggestion(this)">Cach tinh tien su dung dat khi duoc giao dat?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Điều kiện để được cấp giấy chứng nhận quyền sử dụng đất?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Thủ tục thu hồi đất để thực hiện dự án như thế nào?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Quyền và nghĩa vụ của người sử dụng đất là gì?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Cách tính tiền sử dụng đất khi được giao đất?</button>
       </div>
     </div>`;
 
@@ -599,12 +599,18 @@ function addMessage(role, content, sources) {
   let html = `<div class="bubble">${formatContent(content)}`;
 
   if (sources && sources.length > 0) {
-    html += `<div class="sources"><div class="sources-label">Nguon trich dan</div>`;
+    const grouped = {};
     sources.forEach(s => {
-      let label = s.doc_name || '';
-      if (s.dieu) label += ` - ${s.dieu}`;
-      if (s.dieu_title) label += `. ${s.dieu_title}`;
-      if (label) html += `<span class="source-tag">${esc(label)}</span>`;
+      const doc = s.doc_name || '';
+      if (!doc) return;
+      if (!grouped[doc]) grouped[doc] = [];
+      if (s.dieu) grouped[doc].push(s.dieu);
+    });
+    html += `<div class="sources"><div class="sources-label">Nguồn</div>`;
+    Object.entries(grouped).forEach(([doc, dieus]) => {
+      let label = doc;
+      if (dieus.length > 0) label += ': ' + dieus.join(', ');
+      html += `<span class="source-tag">${esc(label)}</span>`;
     });
     html += `</div>`;
   }
@@ -681,7 +687,7 @@ async function handleSubmit(e) {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Loi server');
+      throw new Error(err.detail || 'Lỗi server');
     }
 
     const data = await res.json();
@@ -697,7 +703,7 @@ async function handleSubmit(e) {
     setTimeout(loadSessions, 1000);
   } catch (err) {
     removeTyping();
-    addMessage('assistant', `Xin loi, da xay ra loi: ${err.message}. Vui long thu lai.`);
+    addMessage('assistant', `Xin lỗi, đã xảy ra lỗi: ${err.message}. Vui lòng thử lại.`);
   }
 
   isLoading = false;

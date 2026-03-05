@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
@@ -25,12 +26,36 @@ DOC_NAME_MAP = {
     "49-2026ndcp.signed": "Nghi dinh 49/2026/ND-CP",
     "71-cp.signed": "Nghi dinh 71/2024/ND-CP",
     "88nd.signed": "Nghi dinh 88/2024/ND-CP",
+    "12-2024ndcp": "Nghi dinh 12/2024/ND-CP",
+    "50-2026ndcp": "Nghi dinh 50/2026/ND-CP",
 }
+
+# Reverse mapping: doc_name -> doc_id (short form used in cross-references)
+DOC_ID_MAP = {
+    "Luat Dat Dai 2024 (31/2024/QH15)": "ldd2024",
+    "Nghi dinh 71/2024/ND-CP": "nd71",
+    "Nghi dinh 88/2024/ND-CP": "nd88",
+    "Nghi dinh 102/2024/ND-CP": "nd102",
+    "Nghi dinh 103/2024/ND-CP": "nd103",
+    "Nghi dinh 151/2025/ND-CP": "nd151",
+    "Nghi dinh 226/2025/ND-CP": "nd226",
+    "Nghi quyet 254/2025/QH15": "nq254",
+    "Nghi dinh 49/2026/ND-CP": "nd49",
+    "Nghi dinh 12/2024/ND-CP": "nd12",
+    "Nghi dinh 50/2026/ND-CP": "nd50",
+}
+
+# Amendment decree doc_ids
+AMENDMENT_DOC_IDS = {"nd226", "nd49", "nd50"}
 
 # Regex for Dieu heading: markdown headings or bold
 # Must be at line start, not mid-sentence
+# Matches:
+#   ### Điều N. Title
+#   **Điều N. Title**
+#   **Điều N.** Title
 DIEU_HEADING_RE = re.compile(
-    r"^(?:#{1,6}\s+|\*\*)(Điều\s+\d+)\.\s*(.+?)(?:\*\*)?$"
+    r'^(?:#{1,6}\s+|\*\*|["\u201c\u201d])(Điều\s+\d+[a-zđ]?)\.\s*(?:\*\*\s*)?(.+?)(?:\*\*|["\u201c\u201d])?$'
 )
 
 # Regex for Chuong heading: markdown headings only
@@ -211,7 +236,14 @@ def split_long_dieu(chunk: dict, max_size: int = 2000):
             sub_chunk["metadata_str"] = chunk["metadata_str"] + f" [Khoản {khoan_num}]"
             sub_chunks.append(sub_chunk)
 
-        return sub_chunks
+        # Recursively split any still-oversized Khoan chunks by size
+        result = []
+        for sc in sub_chunks:
+            if len(sc["content"]) > max_size:
+                result.extend(_split_by_size(sc, max_size, overlap=200))
+            else:
+                result.append(sc)
+        return result
 
     # Fallback: fixed-size split with overlap
     return _split_by_size(chunk, max_size, overlap=200)
@@ -309,6 +341,164 @@ def clean_md_text(text: str) -> str:
     return text
 
 
+# ---------- Amendment index builder ----------
+
+# Regex to detect target ND number from a Dieu title in amendment decrees.
+# Matches patterns like "Nghị định số 71/2024/NĐ-CP" or "Nghị định số 103/2024/NĐ-CP"
+_TARGET_ND_RE = re.compile(
+    r"Nghị định số (\d+)/\d{4}/NĐ-CP",
+)
+
+# Map ND number -> doc_id for target resolution
+_ND_NUM_TO_DOC_ID = {
+    "71": "nd71", "88": "nd88", "101": "nd101", "102": "nd102",
+    "102": "nd102", "103": "nd103", "151": "nd151", "226": "nd226",
+    "49": "nd49", "50": "nd50", "12": "nd12", "291": "nd103",
+}
+
+# Regex patterns for amendment types within chunk content
+_AMEND_PATTERNS = [
+    # "Sua doi, bo sung ... Dieu X" or "Sua doi ... khoan Y Dieu X"
+    (re.compile(
+        r"Sửa đổi,?\s*bổ sung\s+.*?(?:khoản\s+\d+\s+)?Điều\s+(\d+[a-zđ]?)",
+        re.IGNORECASE,
+    ), "sua_doi"),
+    # "Thay the ... Dieu X"
+    (re.compile(
+        r"Thay thế\s+.*?Điều\s+(\d+[a-zđ]?)",
+        re.IGNORECASE,
+    ), "thay_the"),
+    # "Bo sung Dieu Xa" (adding new article)
+    (re.compile(
+        r"Bổ sung\s+Điều\s+(\d+[a-zđ]+)",
+        re.IGNORECASE,
+    ), "bo_sung"),
+    # "Bai bo ... Dieu X"
+    (re.compile(
+        r"Bãi bỏ\s+.*?Điều\s+(\d+[a-zđ]?)",
+        re.IGNORECASE,
+    ), "bai_bo"),
+]
+
+
+def _resolve_target_doc(dieu_title: str) -> str | None:
+    """Extract target doc_id from a Dieu title of an amendment decree.
+
+    E.g. "Sua doi, bo sung mot so dieu cua Nghi dinh so 71/2024/ND-CP ..."
+    -> "nd71"
+    """
+    m = _TARGET_ND_RE.search(dieu_title)
+    if m:
+        nd_num = m.group(1)
+        return _ND_NUM_TO_DOC_ID.get(nd_num)
+    return None
+
+
+def _detect_amendments_in_content(content: str) -> list[dict]:
+    """Detect amendment targets (Dieu numbers + type) within chunk content.
+
+    Returns list of {"target_dieu": "Dieu X", "type": "sua_doi"|...}.
+    """
+    results = []
+    seen = set()
+    for pattern, atype in _AMEND_PATTERNS:
+        for m in pattern.finditer(content):
+            dieu_num = m.group(1)
+            key = (f"Điều {dieu_num}", atype)
+            if key not in seen:
+                seen.add(key)
+                results.append({
+                    "target_dieu": f"Điều {dieu_num}",
+                    "type": atype,
+                })
+    return results
+
+
+def build_amendment_index(all_chunks: list[dict]) -> dict:
+    """Build amendment index mapping from amendment decrees to their targets.
+
+    Scans chunks from amendment decrees (nd226, nd49, nd50), detects
+    which Dieu in which target decree each chunk amends, and saves
+    the result to data/amendment_index.json.
+
+    Returns the index dict.
+    """
+    index = {}
+
+    # Group amendment chunks by (source_doc_id, source_dieu)
+    # so we can resolve the target doc from the Dieu title once per Dieu.
+    source_groups: dict[tuple[str, str], list[dict]] = {}
+
+    for chunk in all_chunks:
+        doc_name = chunk.get("doc_name", "")
+        doc_id = DOC_ID_MAP.get(doc_name)
+        if not doc_id or doc_id not in AMENDMENT_DOC_IDS:
+            continue
+        dieu = chunk.get("dieu", "")
+        if not dieu:
+            continue
+        key = (doc_id, dieu)
+        source_groups.setdefault(key, []).append(chunk)
+
+    for (source_doc_id, source_dieu), chunks in source_groups.items():
+        # Resolve target doc from the Dieu title (all chunks from same Dieu
+        # share the same dieu_title)
+        dieu_title = chunks[0].get("dieu_title", "")
+        target_doc_id = _resolve_target_doc(dieu_title)
+        if not target_doc_id:
+            continue
+
+        index_key = f"{source_doc_id}->{target_doc_id}"
+        if index_key not in index:
+            index[index_key] = {
+                "source_doc": source_doc_id,
+                "target_doc": target_doc_id,
+                "amendments": [],
+            }
+
+        # Scan each chunk for specific amendment targets
+        for chunk in chunks:
+            content = chunk.get("content", "")
+            amendments = _detect_amendments_in_content(content)
+            chunk_id = chunk.get("chunk_id", "")
+
+            for amend in amendments:
+                # Check if we already have this exact amendment recorded
+                existing = None
+                for a in index[index_key]["amendments"]:
+                    if (a["source_dieu"] == source_dieu
+                            and a["target_dieu"] == amend["target_dieu"]
+                            and a["type"] == amend["type"]):
+                        existing = a
+                        break
+
+                if existing:
+                    if chunk_id not in existing["chunk_ids"]:
+                        existing["chunk_ids"].append(chunk_id)
+                else:
+                    index[index_key]["amendments"].append({
+                        "source_dieu": source_dieu,
+                        "target_dieu": amend["target_dieu"],
+                        "type": amend["type"],
+                        "chunk_ids": [chunk_id],
+                    })
+
+    # Save to JSON
+    output_path = os.path.join(DATA_DIR, "amendment_index.json")
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(index, f, ensure_ascii=False, indent=2)
+
+    # Print stats
+    total_amendments = sum(
+        len(v["amendments"]) for v in index.values()
+    )
+    print(f"\n  Amendment index: {len(index)} relationships, "
+          f"{total_amendments} amendment entries")
+    print(f"  Saved to: {output_path}")
+
+    return index
+
+
 def process_file(filepath: str):
     """Read .md file, clean, find all Dieu, split long ones.
 
@@ -319,8 +509,8 @@ def process_file(filepath: str):
 
     text = clean_md_text(text)
 
-    # Determine doc_name from filename
-    basename = os.path.splitext(os.path.basename(filepath))[0]
+    # Determine doc_name from filename (NFC normalize for macOS NFD filenames)
+    basename = unicodedata.normalize("NFC", os.path.splitext(os.path.basename(filepath))[0])
     doc_name = DOC_NAME_MAP.get(basename, basename)
 
     chunks = find_all_dieu(text, doc_name)
@@ -352,7 +542,7 @@ def main():
     for md_file in md_files:
         filepath = os.path.join(DATA_DIR, md_file)
         chunks = process_file(filepath)
-        basename = os.path.splitext(md_file)[0]
+        basename = unicodedata.normalize("NFC", os.path.splitext(md_file)[0])
         doc_name = DOC_NAME_MAP.get(basename, basename)
         total_by_doc[doc_name] = len(chunks)
         all_chunks.extend(chunks)
@@ -365,6 +555,9 @@ def main():
     output_path = os.path.join(CHUNKS_DIR, "all_chunks.json")
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(all_chunks, f, ensure_ascii=False, indent=2)
+
+    # Build amendment index
+    build_amendment_index(all_chunks)
 
     # Print stats
     print(f"\n{'='*60}")

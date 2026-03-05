@@ -1,0 +1,221 @@
+{
+  "nd226->nd71": {
+    "source_doc": "nd226",
+    "target_doc": "nd71",
+    "amendments": [
+      {
+        "source_dieu": "Điều 1",
+        "target_dieu": "Điều 3",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2212"
+        ]
+      },
+      {
+        "source_dieu": "Điều 1",
+        "target_dieu": "Điều 4",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2213"
+        ]
+      },
+      {
+        "source_dieu": "Điều 1",
+        "target_dieu": "Điều 5",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2216"
+        ]
+      },
+      {
+        "source_dieu": "Điều 1",
+        "target_dieu": "Điều 6",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2218"
+        ]
+      },
+      {
+        "source_dieu": "Điều 1",
+        "target_dieu": "Điều 8",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2224"
+        ]
+      },
+      {
+        "source_dieu": "Điều 1",
+        "target_dieu": "Điều 10",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2225"
+        ]
+      }
+    ]
+  },
+  "nd226->nd88": {
+    "source_doc": "nd226",
+    "target_doc": "nd88",
+    "amendments": [
+      {
+        "source_dieu": "Điều 2",
+        "target_dieu": "Điều 7a",
+        "type": "bo_sung",
+        "chunk_ids": [
+          "chunk_2240"
+        ]
+      }
+    ]
+  },
+  "nd49->nd71": {
+    "source_doc": "nd49",
+    "target_doc": "nd71",
+    "amendments": [
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 13",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2410",
+          "chunk_2420"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 14",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2412"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 19",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2413"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 38",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2414"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 4",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2418",
+          "chunk_2425"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 5",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2419",
+          "chunk_2426"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 26",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2423"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 28",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2424"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 6",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2428"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 9",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2429"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 18",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2431"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 25",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2434"
+        ]
+      },
+      {
+        "source_dieu": "Điều 10",
+        "target_dieu": "Điều 64a",
+        "type": "bo_sung",
+        "chunk_ids": [
+          "chunk_2435"
+        ]
+      }
+    ]
+  },
+  "nd50->nd103": {
+    "source_doc": "nd50",
+    "target_doc": "nd103",
+    "amendments": [
+      {
+        "source_dieu": "Điều 13",
+        "target_dieu": "Điều 5",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2525"
+        ]
+      },
+      {
+        "source_dieu": "Điều 13",
+        "target_dieu": "Điều 6",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2529"
+        ]
+      },
+      {
+        "source_dieu": "Điều 13",
+        "target_dieu": "Điều 7",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2531"
+        ]
+      },
+      {
+        "source_dieu": "Điều 13",
+        "target_dieu": "Điều 8",
+        "type": "sua_doi",
+        "chunk_ids": [
+          "chunk_2534"
+        ]
+      }
+    ]
+  }
+}

@@ -1,7 +1,14 @@
 """Chat orchestrator: ties RAG, memory, and LLM together."""
+import logging
+import time
 import uuid
 
-from app import db, llm, rag
+from app import db, llm
+
+logger = logging.getLogger(__name__)
+from app.rag import search as rag_search
+from app.rag.retriever import build_context
+from app.rag.citation_check import verify_citations
 from app.config import CONTEXT_WINDOW_TURNS, CONTEXT_MAX_CHARS, SUMMARY_INTERVAL_TURNS
 
 SYSTEM_PROMPT = """Ban la chuyen gia tu van phap luat dat dai Viet Nam. Ban tra loi cau hoi dua tren cac van ban phap luat duoc cung cap.
@@ -23,7 +30,16 @@ He thong van ban:
 - Nghi dinh 151/2025 - phan dinh tham quyen chinh quyen dia phuong
 - Nghi dinh 226/2025 - sua doi bo sung cac nghi dinh
 - Nghi quyet 254/2025 - thao go vuong mac thi hanh Luat Dat Dai
-- Nghi dinh 49/2026 - sua doi bo sung nghi dinh chi tiet Luat Dat Dai"""
+- Nghi dinh 49/2026 - sua doi bo sung nghi dinh chi tiet Luat Dat Dai
+- Nghi dinh 12/2024 - sua doi ND 44/2014 va ND 10/2023 ve gia dat (chuyen tiep)
+- Nghi dinh 50/2026 - chi tiet NQ 254/2025 ve tien su dung dat, tien thue dat
+
+Luu y quan trong ve hieu luc:
+- Khi Nghi dinh sau sua doi Nghi dinh truoc, ap dung noi dung da sua doi
+- Thu tu uu tien: ND moi nhat > ND cu > Luat goc
+- ND 49/2026 sua doi ND 71, 88, 102, 151, 226
+- ND 226/2025 sua doi ND 71, 88, 102, 151
+- ND 50/2026 sua doi ND 103"""
 
 
 async def handle_message(session_id: str, user_message: str) -> dict:
@@ -41,14 +57,18 @@ async def handle_message(session_id: str, user_message: str) -> dict:
     # Determine complexity for model routing
     complexity = llm.classify_complexity(user_message)
     model = "pro" if complexity == "complex" else "flash"
+    logger.info("[%s] turn=%d model=%s complexity=%s", session_id[:8], turn, model, complexity)
 
-    # Rewrite query with conversation context for better retrieval
-    search_query = await rag.rewrite_query(user_message, _to_history_dicts(history))
+    # Retrieve via new RAG pipeline (handles rewriting, HyDE, filtering, reranking)
+    t0 = time.monotonic()
+    history_dicts = _to_history_dicts(history)
+    retrieval = await rag_search(user_message, history=history_dicts)
+    t_rag = time.monotonic() - t0
 
-    # Retrieve relevant chunks
-    chunks = rag.search(search_query)
-    context = rag.build_context(chunks)
-    sources = rag.extract_sources(chunks)
+    chunks = retrieval["chunks"]
+    context = build_context(chunks)
+    sources = retrieval["sources"]
+    logger.info("[%s] RAG took %.1fs, %d chunks, %d sources", session_id[:8], t_rag, len(chunks), len(sources))
 
     # Build conversation context for LLM
     llm_history = _build_llm_context(history, session_id)
@@ -57,6 +77,7 @@ async def handle_message(session_id: str, user_message: str) -> dict:
     prompt = _build_prompt(user_message, context)
 
     # Generate response
+    t1 = time.monotonic()
     response = await llm.generate(
         prompt=prompt,
         system=SYSTEM_PROMPT,
@@ -65,6 +86,13 @@ async def handle_message(session_id: str, user_message: str) -> dict:
         temperature=0.3,
         max_tokens=4000,
     )
+    t_llm = time.monotonic() - t1
+    logger.info("[%s] LLM took %.1fs (%d chars response)", session_id[:8], t_llm, len(response))
+
+    # Citation verification
+    response, cite_meta = verify_citations(response, chunks)
+    if cite_meta.get("unverified"):
+        logger.warning("[%s] Unverified citations: %s", session_id[:8], cite_meta["unverified"])
 
     # Save assistant response
     db.add_message(session_id, turn, "assistant", response, sources)
