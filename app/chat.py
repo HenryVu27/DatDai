@@ -1,93 +1,370 @@
-"""Chat orchestrator: ties RAG, memory, and LLM together."""
+"""Agentic chat orchestrator.
+
+Two-stage pipeline:
+1. Orchestrator (Flash 3) decides what tools to call
+2. Generator (Pro 3.1 / Flash 3) produces the answer
+"""
+import asyncio
+import json
 import logging
 import time
 import uuid
 
 from app import db, llm
+from app.config import CONTEXT_MAX_TURN_GROUPS, CONTEXT_MAX_CHARS
+from app.rag.retriever import (
+    search_legal_docs, lookup_amendment, lookup_specific_dieu,
+    build_context, extract_sources,
+)
+from app.rag.query_rewriter import extract_filters
+from app.rag.citation_check import verify_citations
 
 logger = logging.getLogger(__name__)
-from app.rag import search as rag_search
-from app.rag.retriever import build_context
-from app.rag.citation_check import verify_citations
-from app.config import CONTEXT_WINDOW_TURNS, CONTEXT_MAX_CHARS, SUMMARY_INTERVAL_TURNS
 
-SYSTEM_PROMPT = """Ban la chuyen gia tu van phap luat dat dai Viet Nam. Ban tra loi cau hoi dua tren cac van ban phap luat duoc cung cap.
+# -- System prompts (static, XML-tagged) --
 
-Nguyen tac:
+SYSTEM_BASE = """<identity>
+Ban la chuyen gia tu van phap luat dat dai Viet Nam. Ban tra loi cau hoi dua tren cac van ban phap luat duoc cung cap.
+Tra loi bang tieng Viet, ro rang, de hieu cho nguoi dan thuong.
+</identity>
+
+<boundaries>
 1. Chi tra loi dua tren noi dung van ban phap luat duoc cung cap trong phan "Tai lieu tham khao"
 2. Trich dan cu the so dieu, khoan, diem va ten van ban khi tra loi
 3. Neu thong tin khong co trong tai lieu, noi ro "Toi khong tim thay thong tin nay trong cac van ban hien co"
-4. Tra loi bang tieng Viet, ro rang, de hieu cho nguoi dan thuong
-5. Khi co nhieu van ban lien quan, neu ro moi quan he giua chung (vi du: Luat quy dinh chung, Nghi dinh huong dan chi tiet)
-6. Neu cau hoi mo ho, hoi lai de lam ro truoc khi tra loi
+4. Khi co nhieu van ban lien quan, neu ro moi quan he giua chung (vi du: Luat quy dinh chung, Nghi dinh huong dan chi tiet)
+5. Neu cau hoi mo ho, hoi lai de lam ro truoc khi tra loi
+</boundaries>
 
-He thong van ban:
-- Luat Dat Dai 2024 (Luat so 31/2024/QH15) - luat goc
-- Nghi dinh 71/2024 - ve gia dat
-- Nghi dinh 88/2024 - boi thuong, ho tro, tai dinh cu
-- Nghi dinh 102/2024 - quy dinh chi tiet thi hanh Luat Dat Dai
-- Nghi dinh 103/2024 - tien su dung dat, tien thue dat
-- Nghi dinh 151/2025 - phan dinh tham quyen chinh quyen dia phuong
-- Nghi dinh 226/2025 - sua doi bo sung cac nghi dinh
-- Nghi quyet 254/2025 - thao go vuong mac thi hanh Luat Dat Dai
-- Nghi dinh 49/2026 - sua doi bo sung nghi dinh chi tiet Luat Dat Dai
-- Nghi dinh 12/2024 - sua doi ND 44/2014 va ND 10/2023 ve gia dat (chuyen tiep)
-- Nghi dinh 50/2026 - chi tiet NQ 254/2025 ve tien su dung dat, tien thue dat
+<legal-hierarchy>
+Luat Dat Dai 2024 (31/2024/QH15) - luat goc
+ND 71/2024 - gia dat [sua doi boi: ND 226, ND 49]
+ND 88/2024 - boi thuong, ho tro, tai dinh cu [sua doi boi: ND 226, ND 49]
+ND 102/2024 - chi tiet thi hanh [sua doi boi: ND 226, ND 49]
+ND 103/2024 - tien su dung dat, tien thue dat [sua doi boi: ND 50]
+ND 151/2025 - phan dinh tham quyen [sua doi boi: ND 226, ND 49]
+ND 226/2025 - sua doi 4 ND [sua doi boi: ND 49]
+NQ 254/2025 - thao go vuong mac
+ND 49/2026 - sua doi moi nhat cac ND
+ND 12/2024 - chuyen tiep gia dat
+ND 50/2026 - chi tiet NQ 254 ve tien su dung dat, tien thue dat
+Thu tu uu tien: ND moi nhat > ND cu > Luat goc
+</legal-hierarchy>"""
 
-Luu y quan trong ve hieu luc:
-- Khi Nghi dinh sau sua doi Nghi dinh truoc, ap dung noi dung da sua doi
-- Thu tu uu tien: ND moi nhat > ND cu > Luat goc
-- ND 49/2026 sua doi ND 71, 88, 102, 151, 226
-- ND 226/2025 sua doi ND 71, 88, 102, 151
-- ND 50/2026 sua doi ND 103"""
+ORCHESTRATOR_TOOLS_SECTION = """
+<tools>
+Ban co the goi cac tool sau de tra cuu thong tin. Tra ve JSON hop le.
 
+1. search_legal_docs: Tim kiem van ban phap luat bang ngon ngu tu nhien.
+   Params: {"query": "cau truy van", "filters": {"doc_ids": ["nd102"], "dieu": "Dieu 15"}}
+   - query: viet ro rang, day du ngu canh, khong dung dai tu
+   - filters: tuy chon, chi dinh khi biet chinh xac van ban/dieu
+
+2. lookup_amendment: Tra cuu cac sua doi giua cac nghi dinh.
+   Params: {"target_doc": "nd102", "source_doc": "nd49", "dieu": "Dieu 15"}
+   - target_doc: bat buoc - van ban bi sua doi
+   - source_doc: tuy chon - van ban sua doi (neu biet)
+   - dieu: tuy chon - so dieu cu the
+
+3. lookup_specific_dieu: Lay toan bo noi dung mot dieu cu the.
+   Params: {"doc_id": "ldd2024", "dieu": "Dieu 79"}
+   - Dung khi biet chinh xac dieu va van ban can tra cuu
+
+KHONG goi tool khi:
+- Nguoi dung chao hoi, cam on, noi chuyen xa giao
+- Cau tra loi da co trong lich su hoi thoai gan day
+- Chi can lam ro hoac hoi lai cau hoi cua nguoi dung
+- Nguoi dung hoi ve noi dung ban vua tra loi
+</tools>"""
+
+ORCHESTRATOR_INSTRUCTIONS = """
+<instructions>
+Phan tich tin nhan cua nguoi dung va quyet dinh hanh dong.
+Tra ve CHINH XAC mot JSON object (khong markdown, khong giai thich) voi format:
+{
+  "reasoning": "suy nghi ngan ve nhung gi nguoi dung can",
+  "actions": [
+    {"tool": "ten_tool", ...params}
+  ],
+  "complexity": "simple" hoac "complex",
+  "summary_update": "ban tom tat cap nhat" hoac null,
+  "direct_response": "cau tra loi truc tiep" hoac null
+}
+
+Quy tac:
+- Neu co the tra loi truc tiep (chao hoi, cam on, lam ro), dat direct_response va actions=[]
+- Neu can tra cuu, dat actions voi cac tool call phu hop
+- Co the goi nhieu tool cung luc (vd: search + lookup_amendment)
+- complexity: "complex" cho cau hoi phap ly kho, so sanh, nhieu van ban. "simple" cho con lai
+- summary_update: chi dat khi cuoc hoi thoai da tien trien dang ke (4+ luot). Tom tat phai BAO GOM summary truoc do va bo sung noi dung moi
+- Khi viet query cho search_legal_docs: viet ro rang, khong dung dai tu, bao gom ngu canh tu hoi thoai
+</instructions>"""
+
+
+# -- Context assembly --
+
+def _assemble_conversation_context(history: list[dict], session_id: str) -> tuple[list[dict], str | None]:
+    """Build trimmed conversation context and retrieve summary.
+
+    Returns (recent_messages, summary_text).
+    """
+    summary_row = db.get_latest_summary(session_id)
+    summary_text = summary_row["summary"] if summary_row else None
+
+    # Convert to simple dicts
+    msgs = [{"role": r["role"], "content": r["content"]} for r in history]
+
+    # Atomic turn-group trimming: keep last N complete pairs
+    # A turn-group = (user msg, assistant msg)
+    max_msgs = CONTEXT_MAX_TURN_GROUPS * 2
+    if len(msgs) > max_msgs:
+        msgs = msgs[-max_msgs:]
+
+    # Trim by character budget
+    total_chars = 0
+    trimmed = []
+    for msg in reversed(msgs):
+        total_chars += len(msg["content"])
+        if total_chars > CONTEXT_MAX_CHARS:
+            break
+        trimmed.insert(0, msg)
+
+    # Ensure we don't start with an assistant message (orphaned)
+    if trimmed and trimmed[0]["role"] == "assistant":
+        trimmed = trimmed[1:]
+
+    return trimmed, summary_text
+
+
+def _build_orchestrator_prompt(
+    user_message: str,
+    recent_messages: list[dict],
+    summary: str | None,
+) -> tuple[str, list[dict], str]:
+    """Build system prompt and history for the orchestrator call.
+
+    Returns (system_prompt, history_for_llm, user_prompt).
+    """
+    system = SYSTEM_BASE + ORCHESTRATOR_TOOLS_SECTION + ORCHESTRATOR_INSTRUCTIONS
+
+    # Build volatile context as part of the user message
+    volatile_parts = []
+    if summary:
+        volatile_parts.append(f"<conversation-summary>\n{summary}\n</conversation-summary>")
+
+    # The recent_messages become the LLM history, current message is the prompt
+    history = recent_messages  # These are already trimmed
+
+    # Current user message with any volatile context
+    if volatile_parts:
+        prompt = "\n".join(volatile_parts) + f"\n\n{user_message}"
+    else:
+        prompt = user_message
+
+    return system, history, prompt
+
+
+def _build_generator_prompt(
+    user_message: str,
+    context: str,
+    recent_messages: list[dict],
+    summary: str | None,
+) -> tuple[str, list[dict], str]:
+    """Build system prompt, history, and user prompt for the generator.
+
+    Returns (system_prompt, history_for_llm, user_prompt).
+    """
+    system = SYSTEM_BASE
+
+    history = []
+    if summary:
+        history.append({"role": "user", "content": f"<conversation-summary>\n{summary}\n</conversation-summary>"})
+        history.append({"role": "model", "content": "Da ghi nhan."})
+    history.extend(recent_messages)
+
+    if context:
+        prompt = f"""<retrieved-context>
+{context}
+</retrieved-context>
+
+<user-question>
+{user_message}
+</user-question>
+
+Hay tra loi dua tren tai lieu tham khao o tren. Trich dan cu the dieu, khoan, ten van ban."""
+    else:
+        prompt = f"""<user-question>
+{user_message}
+</user-question>
+
+Tra loi dua tren noi dung da thao luan trong cuoc hoi thoai."""
+
+    return system, history, prompt
+
+
+# -- Orchestrator --
+
+def _parse_orchestrator_response(text: str) -> dict:
+    """Parse the orchestrator's JSON response, handling edge cases."""
+    text = text.strip()
+    # Strip markdown code fences if present
+    if text.startswith("```"):
+        lines = text.split("\n")
+        # Remove first line (```json) and last line (```)
+        lines = [l for l in lines[1:] if not l.strip().startswith("```")]
+        text = "\n".join(lines)
+
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("Orchestrator returned invalid JSON, treating as direct response: %s", text[:200])
+        return {
+            "reasoning": "Failed to parse orchestrator output",
+            "actions": [],
+            "complexity": "simple",
+            "summary_update": None,
+            "direct_response": text,
+        }
+
+    # Ensure required keys with defaults
+    result.setdefault("reasoning", "")
+    result.setdefault("actions", [])
+    result.setdefault("complexity", "simple")
+    result.setdefault("summary_update", None)
+    result.setdefault("direct_response", None)
+    return result
+
+
+async def _execute_tools(actions: list[dict]) -> list[dict]:
+    """Execute orchestrator tool calls in parallel. Returns merged chunks."""
+    if not actions:
+        return []
+
+    async def _run_action(action: dict) -> list[dict]:
+        tool = action.get("tool", "")
+        try:
+            if tool == "search_legal_docs":
+                query = action.get("query", "")
+                filters = action.get("filters", {})
+                return await search_legal_docs(
+                    query=query,
+                    doc_ids=filters.get("doc_ids"),
+                    dieu=filters.get("dieu"),
+                )
+            elif tool == "lookup_amendment":
+                return lookup_amendment(
+                    target_doc=action.get("target_doc", ""),
+                    source_doc=action.get("source_doc"),
+                    dieu=action.get("dieu"),
+                )
+            elif tool == "lookup_specific_dieu":
+                return lookup_specific_dieu(
+                    doc_id=action.get("doc_id", ""),
+                    dieu=action.get("dieu", ""),
+                )
+            else:
+                logger.warning("Unknown tool: %s", tool)
+                return []
+        except Exception as e:
+            logger.error("Tool %s failed: %s", tool, e)
+            return []
+
+    results = await asyncio.gather(*[_run_action(a) for a in actions])
+
+    # Merge and deduplicate
+    seen_ids = set()
+    merged = []
+    for chunk_list in results:
+        for chunk in chunk_list:
+            cid = chunk.get("chunk_id")
+            if cid and cid not in seen_ids:
+                seen_ids.add(cid)
+                merged.append(chunk)
+            elif not cid:
+                merged.append(chunk)
+
+    return merged
+
+
+# -- Main entry point --
 
 async def handle_message(session_id: str, user_message: str) -> dict:
-    """Process a user message and return response with sources."""
+    """Process a user message through the orchestrator pipeline."""
+    t_start = time.monotonic()
+
     # Ensure session exists
     db.create_session(session_id)
 
-    # Get conversation history
+    # Get conversation history and turn count
     history = db.get_messages(session_id)
     turn = db.get_turn_count(session_id) + 1
 
     # Save user message
     db.add_message(session_id, turn, "user", user_message)
 
-    # Determine complexity for model routing
-    complexity = llm.classify_complexity(user_message)
-    model = "pro" if complexity == "complex" else "flash"
-    logger.info("[%s] turn=%d model=%s complexity=%s", session_id[:8], turn, model, complexity)
+    # Assemble conversation context
+    recent_messages, summary = _assemble_conversation_context(history, session_id)
 
-    # Retrieve via new RAG pipeline (handles rewriting, HyDE, filtering, reranking)
-    t0 = time.monotonic()
-    history_dicts = _to_history_dicts(history)
-    retrieval = await rag_search(user_message, history=history_dicts)
-    t_rag = time.monotonic() - t0
+    # -- Stage 1: Orchestrator --
+    t_orch = time.monotonic()
+    orch_system, orch_history, orch_prompt = _build_orchestrator_prompt(
+        user_message, recent_messages, summary,
+    )
 
-    chunks = retrieval["chunks"]
+    orch_raw = await llm.generate(
+        prompt=orch_prompt,
+        system=orch_system,
+        history=orch_history,
+        model="orchestrator",
+        temperature=0.0,
+        max_tokens=1000,
+    )
+    decision = _parse_orchestrator_response(orch_raw)
+    logger.info(
+        "[%s] turn=%d orchestrator: complexity=%s actions=%d direct=%s (%.1fs)",
+        session_id[:8], turn, decision["complexity"],
+        len(decision["actions"]), bool(decision["direct_response"]),
+        time.monotonic() - t_orch,
+    )
+
+    # Save summary update if provided
+    if decision["summary_update"]:
+        db.upsert_summary(session_id, decision["summary_update"], turn)
+
+    # -- Direct response path --
+    if decision["direct_response"]:
+        response = decision["direct_response"]
+        db.add_message(session_id, turn, "assistant", response, [])
+
+        if turn == 1:
+            await _generate_title(session_id, user_message, response)
+
+        return {"answer": response, "sources": [], "session_id": session_id}
+
+    # -- Stage 2: Execute tools --
+    t_tools = time.monotonic()
+    chunks = await _execute_tools(decision["actions"])
+    logger.info("[%s] tools returned %d chunks (%.1fs)", session_id[:8], len(chunks), time.monotonic() - t_tools)
+
     context = build_context(chunks)
-    sources = retrieval["sources"]
-    logger.info("[%s] RAG took %.1fs, %d chunks, %d sources", session_id[:8], t_rag, len(chunks), len(sources))
+    sources = extract_sources(chunks)
 
-    # Build conversation context for LLM
-    llm_history = _build_llm_context(history, session_id)
+    # -- Stage 3: Generator --
+    t_gen = time.monotonic()
+    model = "pro" if decision["complexity"] == "complex" else "flash"
+    gen_system, gen_history, gen_prompt = _build_generator_prompt(
+        user_message, context, recent_messages, summary,
+    )
 
-    # Build the prompt with RAG context
-    prompt = _build_prompt(user_message, context)
-
-    # Generate response
-    t1 = time.monotonic()
     response = await llm.generate(
-        prompt=prompt,
-        system=SYSTEM_PROMPT,
-        history=llm_history,
+        prompt=gen_prompt,
+        system=gen_system,
+        history=gen_history,
         model=model,
         temperature=0.3,
-        max_tokens=4000,
+        max_tokens=8000,
     )
-    t_llm = time.monotonic() - t1
-    logger.info("[%s] LLM took %.1fs (%d chars response)", session_id[:8], t_llm, len(response))
+    logger.info("[%s] generator (%s): %d chars (%.1fs)", session_id[:8], model, len(response), time.monotonic() - t_gen)
 
     # Citation verification
     response, cite_meta = verify_citations(response, chunks)
@@ -97,96 +374,13 @@ async def handle_message(session_id: str, user_message: str) -> dict:
     # Save assistant response
     db.add_message(session_id, turn, "assistant", response, sources)
 
-    # Generate rolling summary if needed
-    if turn % SUMMARY_INTERVAL_TURNS == 0:
-        await _generate_summary(session_id, history, turn)
-
     # Auto-generate title for new sessions
     if turn == 1:
         await _generate_title(session_id, user_message, response)
 
-    return {
-        "answer": response,
-        "sources": sources,
-        "session_id": session_id,
-    }
+    logger.info("[%s] total turn time: %.1fs", session_id[:8], time.monotonic() - t_start)
 
-
-def _to_history_dicts(rows: list[dict]) -> list[dict]:
-    """Convert DB rows to simple history dicts."""
-    return [{"role": r["role"], "content": r["content"]} for r in rows]
-
-
-def _build_llm_context(history: list[dict], session_id: str) -> list[dict]:
-    """Build trimmed conversation context for LLM."""
-    # Get rolling summary if available
-    summary = db.get_latest_summary(session_id)
-
-    msgs = _to_history_dicts(history)
-
-    # Trim to context window
-    if len(msgs) > CONTEXT_WINDOW_TURNS * 2:
-        msgs = msgs[-(CONTEXT_WINDOW_TURNS * 2):]
-
-    # Trim by character count
-    total_chars = 0
-    trimmed = []
-    for msg in reversed(msgs):
-        total_chars += len(msg["content"])
-        if total_chars > CONTEXT_MAX_CHARS:
-            break
-        trimmed.insert(0, msg)
-
-    # Prepend summary if we trimmed messages
-    if summary and len(trimmed) < len(_to_history_dicts(history)):
-        trimmed.insert(0, {
-            "role": "user",
-            "content": f"[Tom tat hoi thoai truoc]: {summary['summary']}",
-        })
-        trimmed.insert(1, {
-            "role": "model",
-            "content": "Da hieu, toi se tham khao thong tin nay de tra loi tiep.",
-        })
-
-    return trimmed
-
-
-def _build_prompt(question: str, context: str) -> str:
-    """Build the final prompt with RAG context."""
-    if context:
-        return f"""Tai lieu tham khao:
-{context}
-
----
-Cau hoi cua nguoi dung: {question}
-
-Hay tra loi dua tren tai lieu tham khao o tren. Trich dan cu the dieu, khoan, ten van ban."""
-    else:
-        return f"""Cau hoi cua nguoi dung: {question}
-
-Luu y: Khong tim thay tai lieu lien quan trong co so du lieu. Hay tra loi dua tren kien thuc chung ve phap luat dat dai Viet Nam va luu y nguoi dung rang cau tra loi chua duoc xac minh tu van ban cu the."""
-
-
-async def _generate_summary(session_id: str, history: list[dict], current_turn: int) -> None:
-    """Generate a rolling summary of conversation."""
-    try:
-        msgs = _to_history_dicts(history)
-        recent = msgs[-12:]  # Last 6 exchanges
-        convo = "\n".join(f"{m['role']}: {m['content'][:300]}" for m in recent)
-
-        prompt = f"""Tom tat ngan gon cuoc hoi thoai sau ve phap luat dat dai.
-Giu lai cac dieu khoan, van ban da duoc thao luan va cac cau hoi chinh.
-Chi tra ve ban tom tat, khong giai thich.
-
-{convo}
-
-Tom tat:"""
-
-        summary = await llm.generate(prompt, model="flash", temperature=0.0, max_tokens=500)
-        if summary and len(summary) > 20:
-            db.save_summary(session_id, summary.strip(), current_turn)
-    except Exception:
-        pass
+    return {"answer": response, "sources": sources, "session_id": session_id}
 
 
 async def _generate_title(session_id: str, question: str, answer: str) -> None:
@@ -198,8 +392,7 @@ Chi tra ve tieu de, khong giai thich, khong dau ngoac kep.
 Cau hoi: {question[:200]}
 
 Tieu de:"""
-
-        title = await llm.generate(prompt, model="flash", temperature=0.0, max_tokens=60)
+        title = await llm.generate(prompt, model="utility", temperature=0.0, max_tokens=60)
         if title and len(title.strip()) > 3:
             db.update_session_title(session_id, title.strip()[:80])
     except Exception:
