@@ -240,13 +240,21 @@ def _build_generator_prompt(
 {user_message}
 </user-question>
 
-Hay tra loi dua tren tai lieu tham khao o tren. Trich dan cu the dieu, khoan, ten van ban."""
+Hay tra loi cau hoi dua tren tai lieu tham khao o tren.
+Yeu cau:
+- Trich dan cu the so dieu, khoan, diem va ten van ban (vd: "Theo Dieu 79 Luat Dat Dai 2024...")
+- Neu co nhieu van ban lien quan, giai thich moi quan he (luat goc -> nghi dinh huong dan -> nghi dinh sua doi)
+- Neu thong tin trong tai lieu khong du de tra loi day du, noi ro phan nao chua tim thay
+- Tra loi co cau truc, dung bullet points khi liet ke nhieu muc
+- Khong tu them thong tin ngoai tai lieu duoc cung cap"""
     else:
         prompt = f"""<user-question>
 {user_message}
 </user-question>
 
-Tra loi dua tren noi dung da thao luan trong cuoc hoi thoai."""
+Toi khong tim thay tai lieu lien quan trong co so du lieu cho cau hoi nay.
+Hay noi ro voi nguoi dung rang ban khong tim thay thong tin cu the trong cac van ban hien co.
+Goi y ho cach hoi cu the hon, vi du: chi dinh so dieu, ten van ban (Luat Dat Dai, ND 102...), hoac mo ta tinh huong cu the."""
 
     return system, history, prompt
 
