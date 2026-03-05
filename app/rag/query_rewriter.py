@@ -1,9 +1,5 @@
-"""Query rewriting and filter extraction for legal RAG."""
-import logging
+"""Filter extraction for legal RAG queries."""
 import re
-from app import llm
-
-logger = logging.getLogger(__name__)
 
 DOC_PATTERNS = {
     r"(?:luật đất đai|luat dat dai|luật\s*số\s*31)": ["ldd2024"],
@@ -34,28 +30,3 @@ def extract_filters(query: str) -> dict:
     if m:
         dieu = f"Điều {m.group(1)}"
     return {"doc_ids": list(set(doc_ids)) or None, "dieu": dieu}
-
-
-async def rewrite_query(query: str, history: list[dict] | None = None) -> str:
-    """Rewrite query with conversation context."""
-    if not history or len(history) < 2:
-        return query
-    recent = history[-6:]
-    context = "\n".join(f"{m['role']}: {m['content'][:200]}" for m in recent)
-    prompt = f"""Viet lai cau hoi sau de ro rang hon, giai quyet dai tu va tham chieu ngam.
-Giu nguyen y dinh goc. Tra ve CHI cau hoi da viet lai, khong giai thich.
-
-Lich su hoi thoai:
-{context}
-
-Cau hoi: {query}
-
-Cau hoi da viet lai:"""
-    try:
-        rewritten = await llm.generate(prompt, model="flash", temperature=0.0, max_tokens=200)
-        rewritten = rewritten.strip().strip('"').strip("'")
-        if 10 < len(rewritten) < 500:
-            return rewritten
-    except Exception:
-        pass
-    return query
