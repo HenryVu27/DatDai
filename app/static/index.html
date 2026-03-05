@@ -212,8 +212,8 @@ body { display: flex; }
   justify-content: flex-end;
 }
 .message.user .bubble {
-  background: var(--text);
-  color: #f5f3ef;
+  background: var(--accent-medium);
+  color: var(--text);
   border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
   padding: 0.7rem 1rem;
   max-width: 75%;
@@ -223,22 +223,11 @@ body { display: flex; }
 
 /* Assistant message */
 .message.assistant .bubble {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 4px var(--radius-lg) var(--radius-lg) var(--radius-lg);
-  padding: 1rem 1.2rem;
+  background: transparent;
+  border: none;
+  padding: 0.5rem 0;
   font-size: 0.9rem;
   line-height: 1.75;
-  position: relative;
-}
-.message.assistant .bubble::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0;
-  width: 3px;
-  height: 100%;
-  background: linear-gradient(180deg, var(--accent), var(--gold));
-  border-radius: 3px 0 0 3px;
 }
 
 /* Text formatting in bubbles */
@@ -336,8 +325,8 @@ body { display: flex; }
   width: 46px; height: 46px;
   border: none;
   border-radius: var(--radius-lg);
-  background: var(--accent);
-  color: white;
+  background: transparent;
+  color: var(--text);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -475,7 +464,7 @@ body { display: flex; }
     <form id="input-form" onsubmit="handleSubmit(event)">
       <textarea id="question-input" placeholder="Hỏi về luật đất đai..." rows="1" autofocus></textarea>
       <button type="submit" id="send-btn" title="Gửi câu hỏi">
-        <svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+        <svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
       </button>
     </form>
   </div>
@@ -492,6 +481,12 @@ const topbarTitle = document.getElementById('topbar-title');
 
 let currentSessionId = null;
 let isLoading = false;
+
+// Restore last session from localStorage
+const savedSessionId = localStorage.getItem('datdai_session_id');
+if (savedSessionId) {
+  currentSessionId = savedSessionId;
+}
 
 // ===== Sidebar =====
 function toggleSidebar() {
@@ -520,6 +515,7 @@ async function loadSessions() {
 
 async function switchSession(id, title) {
   currentSessionId = id;
+  localStorage.setItem('datdai_session_id', id);
   topbarTitle.textContent = title;
   chatArea.innerHTML = '';
 
@@ -544,6 +540,7 @@ async function switchSession(id, title) {
 
 async function newChat() {
   currentSessionId = null;
+  localStorage.removeItem('datdai_session_id');
   topbarTitle.textContent = 'Cuộc hội thoại mới';
   chatArea.innerHTML = `
     <div class="welcome" id="welcome">
@@ -638,9 +635,12 @@ function formatContent(text) {
   let h = esc(text);
   // Bold
   h = h.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  // Headers
-  h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  // Headers (h1-h6)
+  h = h.replace(/^#{1,6} (.+)$/gm, (match, text) => {
+    const level = match.indexOf(' ');
+    const tag = level > 6 ? 'h6' : 'h' + level;
+    return `<${tag}>${text}</${tag}>`;
+  });
   // Lists
   h = h.replace(/^- (.+)$/gm, '<li>$1</li>');
   h = h.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
@@ -695,6 +695,7 @@ async function handleSubmit(e) {
     // Set session ID from server response
     if (!currentSessionId && data.session_id) {
       currentSessionId = data.session_id;
+      localStorage.setItem('datdai_session_id', currentSessionId);
     }
 
     addMessage('assistant', data.answer, data.sources);
@@ -712,7 +713,12 @@ async function handleSubmit(e) {
 }
 
 // ===== Init =====
-loadSessions();
+loadSessions().then(() => {
+  if (currentSessionId) {
+    const title = document.querySelector(`.session-item.active`)?.textContent || 'Cuoc hoi thoai';
+    switchSession(currentSessionId, title);
+  }
+});
 </script>
 </body>
 </html>
