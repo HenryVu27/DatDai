@@ -106,6 +106,31 @@ def get_latest_summary(session_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def upsert_summary(session_id: str, summary: str, covers_through_turn: int) -> None:
+    """Insert or update the rolling summary for a session.
+
+    The orchestrator generates summary_update on some turns. We keep only one
+    active summary per session and update it in place.
+    """
+    db = get_db()
+    existing = db.execute(
+        "SELECT id FROM summaries WHERE session_id = ? ORDER BY covers_through_turn DESC LIMIT 1",
+        (session_id,),
+    ).fetchone()
+    if existing:
+        db.execute(
+            "UPDATE summaries SET summary = ?, covers_through_turn = ?, created_at = ? WHERE id = ?",
+            (summary, covers_through_turn, datetime.now().isoformat(), existing["id"]),
+        )
+    else:
+        db.execute(
+            "INSERT INTO summaries (session_id, summary, covers_through_turn, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, summary, covers_through_turn, datetime.now().isoformat()),
+        )
+    db.commit()
+    db.close()
+
+
 def get_sessions() -> list[dict]:
     db = get_db()
     rows = db.execute(
