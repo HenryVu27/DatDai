@@ -1,10 +1,25 @@
-"""Gemini LLM client with model routing."""
+"""Gemini LLM client with model routing and fallback."""
+import logging
 from google import genai
 from google.genai import types
 
-from app.config import GEMINI_API_KEY, GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GEMINI_EMBEDDING_MODEL
+from app.config import (
+    GEMINI_API_KEY, EMBEDDING_MODEL,
+    ORCHESTRATOR_MODEL, GENERATOR_PRO_MODEL, GENERATOR_FLASH_MODEL, UTILITY_MODEL,
+    FALLBACK_PRO_MODEL, FALLBACK_FLASH_MODEL, FALLBACK_UTILITY_MODEL,
+)
+
+logger = logging.getLogger(__name__)
 
 _client = None
+
+# Model role -> (primary, fallback)
+MODEL_MAP = {
+    "orchestrator": (ORCHESTRATOR_MODEL, FALLBACK_FLASH_MODEL),
+    "pro": (GENERATOR_PRO_MODEL, FALLBACK_PRO_MODEL),
+    "flash": (GENERATOR_FLASH_MODEL, FALLBACK_FLASH_MODEL),
+    "utility": (UTILITY_MODEL, FALLBACK_UTILITY_MODEL),
+}
 
 
 def get_client() -> genai.Client:
@@ -22,16 +37,15 @@ async def generate(
     temperature: float = 0.3,
     max_tokens: int = 4000,
 ) -> str:
-    """Generate a response using Gemini. model='flash' or 'pro'."""
+    """Generate a response using Gemini with automatic fallback."""
     client = get_client()
-    model_id = GEMINI_PRO_MODEL if model == "pro" else GEMINI_FLASH_MODEL
+    primary, fallback = MODEL_MAP.get(model, (GENERATOR_FLASH_MODEL, FALLBACK_FLASH_MODEL))
 
     contents = []
     if history:
         for msg in history:
             role = "user" if msg["role"] == "user" else "model"
             contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])]))
-
     contents.append(types.Content(role="user", parts=[types.Part.from_text(text=prompt)]))
 
     config = types.GenerateContentConfig(
@@ -40,31 +54,24 @@ async def generate(
         max_output_tokens=max_tokens,
     )
 
-    response = client.models.generate_content(
-        model=model_id,
-        contents=contents,
-        config=config,
-    )
-    return response.text or ""
+    for model_id in (primary, fallback):
+        try:
+            response = client.models.generate_content(
+                model=model_id, contents=contents, config=config,
+            )
+            return response.text or ""
+        except Exception as e:
+            if model_id == primary:
+                logger.warning("Primary model %s failed, trying fallback %s: %s", primary, fallback, e)
+                continue
+            logger.error("Fallback model %s also failed: %s", fallback, e)
+            raise
+
+    return ""
 
 
 def embed(texts: list[str]) -> list[list[float]]:
     """Create embeddings using Gemini embedding model."""
     client = get_client()
-    result = client.models.embed_content(
-        model=GEMINI_EMBEDDING_MODEL,
-        contents=texts,
-    )
+    result = client.models.embed_content(model=EMBEDDING_MODEL, contents=texts)
     return [e.values for e in result.embeddings]
-
-
-def classify_complexity(message: str) -> str:
-    """Quick classification: 'simple' or 'complex'."""
-    simple_indicators = [
-        len(message) < 20,
-        message.strip().endswith("?") and len(message) < 40,
-        any(w in message.lower() for w in ["cam on", "ok", "da", "vang", "chao", "hi", "hello"]),
-    ]
-    if sum(simple_indicators) >= 2:
-        return "simple"
-    return "complex"
