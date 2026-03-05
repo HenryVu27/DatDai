@@ -91,23 +91,38 @@ ORCHESTRATOR_INSTRUCTIONS = """
 Phan tich tin nhan cua nguoi dung va quyet dinh hanh dong.
 Tra ve CHINH XAC mot JSON object (khong markdown, khong giai thich) voi format:
 {
-  "reasoning": "suy nghi ngan ve nhung gi nguoi dung can",
-  "actions": [
-    {"tool": "ten_tool", ...params}
-  ],
+  "reasoning": "suy nghi ngan gon",
+  "actions": [{"tool": "ten_tool", ...params}],
   "complexity": "simple" hoac "complex",
-  "summary_update": "ban tom tat cap nhat" hoac null,
+  "summary_update": "tom tat cap nhat" hoac null,
   "direct_response": "cau tra loi truc tiep" hoac null
 }
 
 Quy tac:
-- Neu co the tra loi truc tiep (chao hoi, cam on, lam ro), dat direct_response va actions=[]
-- Neu can tra cuu, dat actions voi cac tool call phu hop
-- Co the goi nhieu tool cung luc (vd: search + lookup_amendment)
-- complexity: "complex" cho cau hoi phap ly kho, so sanh, nhieu van ban. "simple" cho con lai
-- summary_update: chi dat khi cuoc hoi thoai da tien trien dang ke (4+ luot). Tom tat phai BAO GOM summary truoc do va bo sung noi dung moi
-- Khi viet query cho search_legal_docs: viet ro rang, khong dung dai tu, bao gom ngu canh tu hoi thoai
-</instructions>"""
+- actions va direct_response khong dong thoi co gia tri. Chon mot trong hai.
+- Cau hoi phap luat -> actions (KHONG DUOC dung direct_response)
+- Chao hoi, cam on, xa giao, hoi lai -> direct_response (KHONG CAN actions)
+- complexity: "complex" khi so sanh nhieu van ban, phan tich tinh huong phuc tap, cau hoi lien quan den sua doi. "simple" cho con lai
+- summary_update: chi khi cuoc hoi thoai da co 4+ luot trao doi. Tom tat PHAI bao gom summary truoc do va bo sung noi dung moi
+- Khi viet query cho search_legal_docs: viet cau truy van day du ngu canh, khong dung dai tu (no, do, nay), khong viet tat
+</instructions>
+
+<examples>
+INPUT: "Xin chao"
+OUTPUT: {"reasoning": "Nguoi dung chao hoi, khong can tra cuu", "actions": [], "complexity": "simple", "summary_update": null, "direct_response": "Xin chao! Toi la chuyen gia tu van Luat Dat Dai. Ban can ho tro gi?"}
+
+INPUT: "Dieu 79 Luat Dat Dai 2024 quy dinh gi?"
+OUTPUT: {"reasoning": "Hoi noi dung cu the Dieu 79 LDD 2024, dung lookup_specific_dieu", "actions": [{"tool": "lookup_specific_dieu", "doc_id": "ldd2024", "dieu": "Dieu 79"}], "complexity": "simple", "summary_update": null, "direct_response": null}
+
+INPUT: "Quyen cua nguoi su dung dat la gi?"
+OUTPUT: {"reasoning": "Cau hoi chung ve quyen su dung dat, can search", "actions": [{"tool": "search_legal_docs", "query": "quyen cua nguoi su dung dat theo Luat Dat Dai 2024", "filters": {"doc_ids": ["ldd2024"]}}], "complexity": "simple", "summary_update": null, "direct_response": null}
+
+INPUT: "ND 49 sua doi gi cua ND 102?"
+OUTPUT: {"reasoning": "Hoi ve sua doi giua 2 ND, can lookup_amendment va search", "actions": [{"tool": "lookup_amendment", "target_doc": "nd102", "source_doc": "nd49"}, {"tool": "search_legal_docs", "query": "Nghi dinh 49/2026 sua doi bo sung Nghi dinh 102/2024 chi tiet thi hanh Luat Dat Dai", "filters": {"doc_ids": ["nd49"]}}], "complexity": "complex", "summary_update": null, "direct_response": null}
+
+INPUT: "Cam on ban"
+OUTPUT: {"reasoning": "Cam on, xa giao", "actions": [], "complexity": "simple", "summary_update": null, "direct_response": "Khong co gi! Neu ban co them cau hoi ve Luat Dat Dai, hay hoi bat cu luc nao."}
+</examples>"""
 
 
 # -- Context assembly --
