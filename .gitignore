@@ -1,7 +1,21 @@
+# Environment
 .env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+
+# Data artifacts
 data/raw/
 data/chunks/
 data/chromadb/
 data/chat.db
-__pycache__/
-*.pyc
+
+# Models cache
+models/
