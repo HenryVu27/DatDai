@@ -1,56 +1,65 @@
-"""
-FastAPI server for the land law chatbot.
-"""
+"""FastAPI server for the land law chatbot."""
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import os
 
-from app.rag import RAGEngine
+from app import chat, db
 
 app = FastAPI(title="Chatbot Luat Dat Dai")
-
-# Initialize RAG engine
-rag_engine = None
-
-
-@app.on_event("startup")
-def startup():
-    global rag_engine
-    try:
-        rag_engine = RAGEngine()
-    except Exception as e:
-        print(f"Loi khoi tao RAG engine: {e}")
-        print("Hay dam bao da chay build_index.py va cau hinh OPENAI_API_KEY")
 
 
 class ChatRequest(BaseModel):
     question: str
-    history: list[dict] | None = None
+    session_id: str | None = None
 
 
 class ChatResponse(BaseModel):
     answer: str
     sources: list[dict]
+    session_id: str
+
+
+class SessionResponse(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    first_message: str | None
+    turn_count: int | None
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
-    if not rag_engine:
-        raise HTTPException(
-            status_code=503,
-            detail="RAG engine chua san sang. Hay kiem tra OPENAI_API_KEY va ChromaDB.",
-        )
-
+async def chat_endpoint(request: ChatRequest):
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Cau hoi khong duoc de trong.")
 
+    session_id = request.session_id or chat.create_new_session()
+
     try:
-        result = rag_engine.chat(request.question, request.history)
+        result = await chat.handle_message(session_id, request.question)
         return ChatResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Loi xu ly cau hoi: {str(e)}")
+
+
+@app.get("/sessions")
+def list_sessions() -> list[SessionResponse]:
+    sessions = db.get_sessions()
+    return [SessionResponse(**s) for s in sessions]
+
+
+@app.get("/sessions/{session_id}/messages")
+def get_session_messages(session_id: str):
+    messages = db.get_messages(session_id)
+    return messages
+
+
+@app.post("/sessions")
+def create_session():
+    session_id = chat.create_new_session()
+    return {"session_id": session_id}
 
 
 # Serve static files

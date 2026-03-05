@@ -5,421 +5,597 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Tu Van Luat Dat Dai</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Be+Vietnam+Pro:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --parchment: #f5f0e8;
-  --parchment-deep: #ebe4d4;
-  --ink: #2c2416;
-  --ink-light: #5a4e3c;
-  --ink-faint: #8a7e6c;
-  --vermillion: #c0392b;
-  --vermillion-soft: #e74c3c22;
-  --gold: #b8860b;
-  --gold-soft: #b8860b18;
-  --cream: #faf8f3;
-  --shadow: rgba(44, 36, 22, 0.08);
-  --shadow-deep: rgba(44, 36, 22, 0.15);
+  --bg: #faf9f6;
+  --bg-warm: #f5f2ec;
+  --surface: #ffffff;
+  --surface-hover: #f8f6f2;
+  --border: #e8e4dc;
+  --border-strong: #d4cfc5;
+  --text: #1a1714;
+  --text-secondary: #6b6560;
+  --text-muted: #9e9890;
+  --accent: #b44a2f;
+  --accent-soft: #b44a2f12;
+  --accent-medium: #b44a2f25;
+  --gold: #8b7335;
+  --gold-soft: #8b733512;
+  --blue-soft: #2563eb10;
+  --sidebar-w: 280px;
+  --radius: 10px;
+  --radius-lg: 14px;
 }
 
 html, body {
   height: 100%;
-  font-family: 'Source Serif 4', Georgia, serif;
-  background: var(--parchment);
-  color: var(--ink);
+  font-family: 'Be Vietnam Pro', -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
+  overflow: hidden;
 }
 
-body {
+body { display: flex; }
+
+/* ========== Sidebar ========== */
+#sidebar {
+  width: var(--sidebar-w);
+  height: 100%;
+  background: var(--bg-warm);
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  background-image:
-    radial-gradient(ellipse at 20% 0%, var(--gold-soft) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 100%, var(--vermillion-soft) 0%, transparent 50%);
-}
-
-/* Header */
-header {
-  text-align: center;
-  padding: 2rem 1.5rem 1.5rem;
-  border-bottom: 1px solid var(--parchment-deep);
-  position: relative;
   flex-shrink: 0;
+  transition: transform 0.25s ease;
 }
 
-header::after {
-  content: '';
+#sidebar.hidden {
+  transform: translateX(calc(-1 * var(--sidebar-w)));
   position: absolute;
-  bottom: -1px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 60px;
-  height: 3px;
-  background: var(--vermillion);
+  z-index: 10;
 }
 
-header h1 {
-  font-family: 'Playfair Display', Georgia, serif;
-  font-size: clamp(1.4rem, 3.5vw, 1.8rem);
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-  line-height: 1.2;
+.sidebar-header {
+  padding: 1.25rem 1rem;
+  border-bottom: 1px solid var(--border);
 }
 
-header p {
+.sidebar-brand {
+  font-family: 'Lora', Georgia, serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sidebar-brand svg {
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+}
+
+#new-chat-btn {
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: inherit;
   font-size: 0.85rem;
-  color: var(--ink-faint);
-  margin-top: 0.4rem;
-  font-style: italic;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+#new-chat-btn:hover {
+  border-color: var(--accent);
+  box-shadow: 0 1px 3px rgba(180,74,47,0.08);
+}
+#new-chat-btn svg { width: 16px; height: 16px; stroke: var(--accent); fill: none; stroke-width: 2; }
+
+.sessions-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+.sessions-list::-webkit-scrollbar { width: 4px; }
+.sessions-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.session-item {
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin-bottom: 2px;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-item:hover { background: var(--surface); color: var(--text); }
+.session-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
 }
 
-/* Chat area */
+.sidebar-footer {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ========== Main ========== */
+#main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+
+/* Top bar */
+#topbar {
+  height: 52px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  flex-shrink: 0;
+  gap: 0.75rem;
+}
+
+#toggle-sidebar {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: background 0.12s;
+}
+#toggle-sidebar:hover { background: var(--bg-warm); }
+#toggle-sidebar svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; }
+
+#topbar-title {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ========== Chat ========== */
 #chat-area {
   flex: 1;
   overflow-y: auto;
-  padding: 1.5rem;
+  padding: 1.5rem 1rem;
   scroll-behavior: smooth;
 }
-
-#chat-area::-webkit-scrollbar { width: 6px; }
+#chat-area::-webkit-scrollbar { width: 5px; }
 #chat-area::-webkit-scrollbar-track { background: transparent; }
-#chat-area::-webkit-scrollbar-thumb { background: var(--parchment-deep); border-radius: 3px; }
+#chat-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
 .message {
-  max-width: 720px;
-  margin: 0 auto 1.5rem;
-  animation: fadeUp 0.35s ease-out both;
+  max-width: 760px;
+  margin: 0 auto 1.25rem;
+  animation: msgIn 0.3s ease-out both;
 }
-
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(12px); }
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* User message */
 .message.user {
   display: flex;
   justify-content: flex-end;
 }
-
 .message.user .bubble {
-  background: var(--ink);
-  color: var(--cream);
-  border-radius: 16px 16px 4px 16px;
-  padding: 0.8rem 1.1rem;
-  max-width: 80%;
-  font-size: 0.95rem;
+  background: var(--text);
+  color: #f5f3ef;
+  border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
+  padding: 0.7rem 1rem;
+  max-width: 75%;
+  font-size: 0.9rem;
   line-height: 1.55;
-  box-shadow: 0 2px 8px var(--shadow-deep);
 }
 
+/* Assistant message */
 .message.assistant .bubble {
-  background: var(--cream);
-  border: 1px solid var(--parchment-deep);
-  border-radius: 4px 16px 16px 16px;
-  padding: 1.2rem 1.4rem;
-  font-size: 0.95rem;
-  line-height: 1.7;
-  box-shadow: 0 1px 4px var(--shadow);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px var(--radius-lg) var(--radius-lg) var(--radius-lg);
+  padding: 1rem 1.2rem;
+  font-size: 0.9rem;
+  line-height: 1.75;
   position: relative;
 }
-
 .message.assistant .bubble::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
+  top: 0; left: 0;
   width: 3px;
   height: 100%;
-  background: linear-gradient(180deg, var(--vermillion), var(--gold));
+  background: linear-gradient(180deg, var(--accent), var(--gold));
   border-radius: 3px 0 0 3px;
 }
 
-/* Markdown-like formatting in answers */
-.bubble p { margin-bottom: 0.6em; }
+/* Text formatting in bubbles */
+.bubble p { margin-bottom: 0.5em; }
 .bubble p:last-child { margin-bottom: 0; }
-.bubble strong { font-weight: 600; color: var(--vermillion); }
-.bubble ul, .bubble ol { margin: 0.4em 0 0.6em 1.4em; }
-.bubble li { margin-bottom: 0.3em; }
-.bubble code {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.85em;
-  background: var(--parchment);
-  padding: 0.1em 0.35em;
-  border-radius: 3px;
+.bubble strong { font-weight: 600; color: var(--accent); }
+.bubble em { font-style: italic; }
+.bubble ul, .bubble ol { margin: 0.4em 0 0.5em 1.3em; }
+.bubble li { margin-bottom: 0.25em; }
+.bubble h1, .bubble h2, .bubble h3 {
+  font-family: 'Lora', Georgia, serif;
+  margin: 0.8em 0 0.3em;
+  font-size: 1em;
+  font-weight: 600;
 }
 
 /* Sources */
 .sources {
-  margin-top: 1rem;
-  padding-top: 0.8rem;
-  border-top: 1px dashed var(--parchment-deep);
+  margin-top: 0.8rem;
+  padding-top: 0.7rem;
+  border-top: 1px dashed var(--border);
 }
-
 .sources-label {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--ink-faint);
-  margin-bottom: 0.5rem;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
   font-weight: 600;
 }
-
 .source-tag {
   display: inline-block;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   background: var(--gold-soft);
-  border: 1px solid #b8860b30;
-  color: var(--ink-light);
-  padding: 0.2rem 0.55rem;
+  border: 1px solid #8b733520;
+  color: var(--text-secondary);
+  padding: 0.15rem 0.5rem;
   border-radius: 4px;
-  margin: 0 0.3rem 0.3rem 0;
-  font-family: 'JetBrains Mono', monospace;
-  letter-spacing: -0.02em;
+  margin: 0 0.25rem 0.25rem 0;
+  line-height: 1.5;
 }
 
 /* Typing indicator */
-.typing {
-  display: flex;
-  gap: 5px;
-  padding: 0.8rem 1.2rem;
-  align-items: center;
-}
-
+.typing { display: flex; gap: 5px; padding: 0.6rem 0; align-items: center; }
 .typing span {
-  width: 7px;
-  height: 7px;
-  background: var(--ink-faint);
+  width: 6px; height: 6px;
+  background: var(--text-muted);
   border-radius: 50%;
-  animation: typingDot 1.2s infinite;
+  animation: dot 1.2s infinite;
 }
 .typing span:nth-child(2) { animation-delay: 0.15s; }
 .typing span:nth-child(3) { animation-delay: 0.3s; }
-
-@keyframes typingDot {
+@keyframes dot {
   0%, 60%, 100% { opacity: 0.25; transform: scale(0.8); }
   30% { opacity: 1; transform: scale(1); }
 }
 
-/* Input area */
+/* ========== Input ========== */
 #input-area {
   flex-shrink: 0;
-  padding: 1rem 1.5rem 1.5rem;
-  border-top: 1px solid var(--parchment-deep);
-  background: linear-gradient(0deg, var(--parchment) 60%, transparent);
+  padding: 0.75rem 1rem 1.25rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
 }
-
 #input-form {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
   display: flex;
-  gap: 0.6rem;
+  gap: 0.5rem;
   align-items: flex-end;
 }
-
 #question-input {
   flex: 1;
-  font-family: 'Source Serif 4', Georgia, serif;
-  font-size: 0.95rem;
-  padding: 0.75rem 1rem;
-  border: 1.5px solid var(--parchment-deep);
-  border-radius: 12px;
-  background: var(--cream);
-  color: var(--ink);
+  font-family: 'Be Vietnam Pro', sans-serif;
+  font-size: 0.9rem;
+  padding: 0.7rem 1rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
   outline: none;
   resize: none;
-  min-height: 48px;
+  min-height: 46px;
   max-height: 140px;
   line-height: 1.5;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-
 #question-input:focus {
-  border-color: var(--gold);
-  box-shadow: 0 0 0 3px var(--gold-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
-
-#question-input::placeholder {
-  color: var(--ink-faint);
-  font-style: italic;
-}
+#question-input::placeholder { color: var(--text-muted); }
 
 #send-btn {
-  width: 48px;
-  height: 48px;
+  width: 46px; height: 46px;
   border: none;
-  border-radius: 12px;
-  background: var(--ink);
-  color: var(--cream);
+  border-radius: var(--radius-lg);
+  background: var(--accent);
+  color: white;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s, transform 0.1s;
+  transition: opacity 0.15s, transform 0.1s;
   flex-shrink: 0;
 }
-
-#send-btn:hover { background: var(--ink-light); }
+#send-btn:hover { opacity: 0.88; }
 #send-btn:active { transform: scale(0.95); }
-#send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+#send-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 
-#send-btn svg {
-  width: 20px;
-  height: 20px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-/* Welcome state */
+/* ========== Welcome ========== */
 .welcome {
   max-width: 520px;
-  margin: 3rem auto;
+  margin: 4rem auto 2rem;
   text-align: center;
-  animation: fadeUp 0.5s ease-out both;
+  animation: msgIn 0.5s ease-out both;
 }
-
 .welcome-icon {
-  width: 56px;
-  height: 56px;
+  width: 60px; height: 60px;
   margin: 0 auto 1.2rem;
-  background: var(--gold-soft);
-  border: 1.5px solid #b8860b30;
-  border-radius: 14px;
+  background: var(--accent-soft);
+  border: 1.5px solid var(--accent-medium);
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.6rem;
 }
+.welcome-icon svg { width: 28px; height: 28px; stroke: var(--accent); fill: none; stroke-width: 1.5; }
 
 .welcome h2 {
-  font-family: 'Playfair Display', Georgia, serif;
-  font-size: 1.15rem;
-  font-weight: 400;
-  margin-bottom: 0.6rem;
-  color: var(--ink);
+  font-family: 'Lora', Georgia, serif;
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
 }
-
 .welcome p {
   font-size: 0.88rem;
-  color: var(--ink-faint);
+  color: var(--text-secondary);
   line-height: 1.6;
-  margin-bottom: 1.2rem;
+  margin-bottom: 1.5rem;
 }
 
-.suggestions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
+.suggestions { display: flex; flex-direction: column; gap: 0.4rem; }
 .suggestion {
-  font-family: 'Source Serif 4', Georgia, serif;
-  font-size: 0.88rem;
+  font-family: inherit;
+  font-size: 0.85rem;
   padding: 0.65rem 1rem;
-  background: var(--cream);
-  border: 1px solid var(--parchment-deep);
-  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   cursor: pointer;
-  color: var(--ink-light);
+  color: var(--text-secondary);
   text-align: left;
-  transition: border-color 0.2s, box-shadow 0.2s, color 0.2s;
+  transition: border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
-
 .suggestion:hover {
-  border-color: var(--gold);
-  box-shadow: 0 1px 4px var(--shadow);
-  color: var(--ink);
+  border-color: var(--accent);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 
-/* Mobile adjustments */
-@media (max-width: 600px) {
-  header { padding: 1.2rem 1rem 1rem; }
-  #chat-area { padding: 1rem; }
-  #input-area { padding: 0.8rem 1rem 1rem; }
-  .message.assistant .bubble { padding: 1rem 1.1rem; }
+/* ========== Mobile ========== */
+@media (max-width: 768px) {
+  #sidebar {
+    position: fixed;
+    z-index: 100;
+    height: 100%;
+    transform: translateX(calc(-1 * var(--sidebar-w)));
+  }
+  #sidebar.show { transform: translateX(0); }
+  .mobile-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 99;
+    display: none;
+  }
+  .mobile-overlay.show { display: block; }
 }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>Tu Van Luat Dat Dai</h1>
-  <p>Tra cuu van ban phap luat dat dai Viet Nam</p>
-</header>
-
-<div id="chat-area">
-  <div class="welcome" id="welcome">
-    <div class="welcome-icon">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#b8860b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+<!-- Sidebar -->
+<nav id="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
-        <path d="M8 7h6"/>
-        <path d="M8 11h8"/>
       </svg>
+      Luat Dat Dai
     </div>
-    <h2>Ban can tu van ve phap luat dat dai?</h2>
-    <p>Toi co the giup ban tra cuu Luat Dat Dai 2024 va cac nghi dinh huong dan, trich dan cu the dieu khoan lien quan.</p>
-    <div class="suggestions">
-      <button class="suggestion" onclick="askSuggestion(this)">Dieu kien de duoc cap giay chung nhan quyen su dung dat la gi?</button>
-      <button class="suggestion" onclick="askSuggestion(this)">Trinh tu thu tuc thu hoi dat de thuc hien du an?</button>
-      <button class="suggestion" onclick="askSuggestion(this)">Nguoi nuoc ngoai co duoc mua dat tai Viet Nam khong?</button>
+    <button id="new-chat-btn" onclick="newChat()">
+      <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Cuoc hoi thoai moi
+    </button>
+  </div>
+  <div class="sessions-list" id="sessions-list"></div>
+  <div class="sidebar-footer">Luat Dat Dai 2024 &amp; Nghi dinh huong dan</div>
+</nav>
+
+<div class="mobile-overlay" id="mobile-overlay" onclick="toggleSidebar()"></div>
+
+<!-- Main -->
+<div id="main">
+  <div id="topbar">
+    <button id="toggle-sidebar" onclick="toggleSidebar()">
+      <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div id="topbar-title">Cuoc hoi thoai moi</div>
+  </div>
+
+  <div id="chat-area">
+    <div class="welcome" id="welcome">
+      <div class="welcome-icon">
+        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
+          <path d="M8 7h6"/><path d="M8 11h8"/>
+        </svg>
+      </div>
+      <h2>Tu van Luat Dat Dai</h2>
+      <p>Hoi bat ky cau hoi nao ve Luat Dat Dai 2024, cac nghi dinh huong dan, thu tuc dat dai. Toi se trich dan cu the dieu khoan cho ban.</p>
+      <div class="suggestions">
+        <button class="suggestion" onclick="askSuggestion(this)">Dieu kien de duoc cap giay chung nhan quyen su dung dat?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Thu tuc thu hoi dat de thuc hien du an nhu the nao?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Quyen va nghia vu cua nguoi su dung dat la gi?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Cach tinh tien su dung dat khi duoc giao dat?</button>
+      </div>
     </div>
   </div>
-</div>
 
-<div id="input-area">
-  <form id="input-form" onsubmit="handleSubmit(event)">
-    <textarea
-      id="question-input"
-      placeholder="Hoi ve luat dat dai..."
-      rows="1"
-      autofocus
-    ></textarea>
-    <button type="submit" id="send-btn" title="Gui cau hoi">
-      <svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
-    </button>
-  </form>
+  <div id="input-area">
+    <form id="input-form" onsubmit="handleSubmit(event)">
+      <textarea id="question-input" placeholder="Hoi ve luat dat dai..." rows="1" autofocus></textarea>
+      <button type="submit" id="send-btn" title="Gui cau hoi">
+        <svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+      </button>
+    </form>
+  </div>
 </div>
 
 <script>
 const chatArea = document.getElementById('chat-area');
-const form = document.getElementById('input-form');
 const input = document.getElementById('question-input');
 const sendBtn = document.getElementById('send-btn');
-const welcome = document.getElementById('welcome');
+const sidebar = document.getElementById('sidebar');
+const overlay = document.getElementById('mobile-overlay');
+const sessionsList = document.getElementById('sessions-list');
+const topbarTitle = document.getElementById('topbar-title');
 
-let history = [];
+let currentSessionId = null;
 let isLoading = false;
 
-// Auto-resize textarea
+// ===== Sidebar =====
+function toggleSidebar() {
+  if (window.innerWidth <= 768) {
+    sidebar.classList.toggle('show');
+    overlay.classList.toggle('show');
+  } else {
+    sidebar.classList.toggle('hidden');
+  }
+}
+
+async function loadSessions() {
+  try {
+    const res = await fetch('/sessions');
+    const sessions = await res.json();
+    sessionsList.innerHTML = '';
+    sessions.forEach(s => {
+      const div = document.createElement('div');
+      div.className = 'session-item' + (s.id === currentSessionId ? ' active' : '');
+      div.textContent = s.title || s.first_message || 'Cuoc hoi thoai moi';
+      div.onclick = () => switchSession(s.id, s.title || s.first_message || 'Cuoc hoi thoai moi');
+      sessionsList.appendChild(div);
+    });
+  } catch(e) {}
+}
+
+async function switchSession(id, title) {
+  currentSessionId = id;
+  topbarTitle.textContent = title;
+  chatArea.innerHTML = '';
+
+  // Close mobile sidebar
+  if (window.innerWidth <= 768) {
+    sidebar.classList.remove('show');
+    overlay.classList.remove('show');
+  }
+
+  // Load messages
+  try {
+    const res = await fetch(`/sessions/${id}/messages`);
+    const messages = await res.json();
+    messages.forEach(m => {
+      const sources = m.sources ? JSON.parse(m.sources) : [];
+      addMessage(m.role, m.content, sources);
+    });
+  } catch(e) {}
+
+  loadSessions();
+}
+
+async function newChat() {
+  currentSessionId = null;
+  topbarTitle.textContent = 'Cuoc hoi thoai moi';
+  chatArea.innerHTML = `
+    <div class="welcome" id="welcome">
+      <div class="welcome-icon">
+        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" stroke="var(--accent)" fill="none" stroke-width="1.5">
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
+          <path d="M8 7h6"/><path d="M8 11h8"/>
+        </svg>
+      </div>
+      <h2>Tu van Luat Dat Dai</h2>
+      <p>Hoi bat ky cau hoi nao ve Luat Dat Dai 2024, cac nghi dinh huong dan, thu tuc dat dai. Toi se trich dan cu the dieu khoan cho ban.</p>
+      <div class="suggestions">
+        <button class="suggestion" onclick="askSuggestion(this)">Dieu kien de duoc cap giay chung nhan quyen su dung dat?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Thu tuc thu hoi dat de thuc hien du an nhu the nao?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Quyen va nghia vu cua nguoi su dung dat la gi?</button>
+        <button class="suggestion" onclick="askSuggestion(this)">Cach tinh tien su dung dat khi duoc giao dat?</button>
+      </div>
+    </div>`;
+
+  if (window.innerWidth <= 768) {
+    sidebar.classList.remove('show');
+    overlay.classList.remove('show');
+  }
+
+  loadSessions();
+  input.focus();
+}
+
+// ===== Chat =====
 input.addEventListener('input', () => {
   input.style.height = 'auto';
   input.style.height = Math.min(input.scrollHeight, 140) + 'px';
 });
 
-// Enter to send, Shift+Enter for newline
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    form.dispatchEvent(new Event('submit'));
+    document.getElementById('input-form').dispatchEvent(new Event('submit'));
   }
 });
 
 function askSuggestion(btn) {
   input.value = btn.textContent;
-  form.dispatchEvent(new Event('submit'));
+  document.getElementById('input-form').dispatchEvent(new Event('submit'));
 }
 
 function addMessage(role, content, sources) {
-  if (welcome) welcome.remove();
+  const w = document.getElementById('welcome');
+  if (w) w.remove();
 
   const div = document.createElement('div');
   div.className = `message ${role}`;
-
   let html = `<div class="bubble">${formatContent(content)}`;
 
   if (sources && sources.length > 0) {
@@ -428,11 +604,10 @@ function addMessage(role, content, sources) {
       let label = s.doc_name || '';
       if (s.dieu) label += ` - ${s.dieu}`;
       if (s.dieu_title) label += `. ${s.dieu_title}`;
-      if (label) html += `<span class="source-tag">${escapeHtml(label)}</span>`;
+      if (label) html += `<span class="source-tag">${esc(label)}</span>`;
     });
     html += `</div>`;
   }
-
   html += `</div>`;
   div.innerHTML = html;
   chatArea.appendChild(div);
@@ -454,18 +629,28 @@ function removeTyping() {
 }
 
 function formatContent(text) {
-  // Basic markdown-ish formatting
-  let html = escapeHtml(text);
-  // Bold: **text**
-  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  let h = esc(text);
+  // Bold
+  h = h.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  // Headers
+  h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  // Lists
+  h = h.replace(/^- (.+)$/gm, '<li>$1</li>');
+  h = h.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
   // Paragraphs
-  html = html.split('\n\n').map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
-  return html;
+  h = h.split('\n\n').map(p => {
+    p = p.trim();
+    if (!p) return '';
+    if (p.startsWith('<h') || p.startsWith('<ul')) return p;
+    return `<p>${p.replace(/\n/g, '<br>')}</p>`;
+  }).join('');
+  return h;
 }
 
-function escapeHtml(text) {
+function esc(t) {
   const d = document.createElement('div');
-  d.textContent = text;
+  d.textContent = t;
   return d.innerHTML;
 }
 
@@ -482,13 +667,14 @@ async function handleSubmit(e) {
   addMessage('user', question);
   addTyping();
 
-  history.push({ role: 'user', content: question });
-
   try {
     const res = await fetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, history: history.slice(-6) }),
+      body: JSON.stringify({
+        question,
+        session_id: currentSessionId
+      }),
     });
 
     removeTyping();
@@ -499,8 +685,16 @@ async function handleSubmit(e) {
     }
 
     const data = await res.json();
+
+    // Set session ID from server response
+    if (!currentSessionId && data.session_id) {
+      currentSessionId = data.session_id;
+    }
+
     addMessage('assistant', data.answer, data.sources);
-    history.push({ role: 'assistant', content: data.answer });
+
+    // Refresh sessions list (new title may have been generated)
+    setTimeout(loadSessions, 1000);
   } catch (err) {
     removeTyping();
     addMessage('assistant', `Xin loi, da xay ra loi: ${err.message}. Vui long thu lai.`);
@@ -510,6 +704,9 @@ async function handleSubmit(e) {
   sendBtn.disabled = false;
   input.focus();
 }
+
+// ===== Init =====
+loadSessions();
 </script>
 </body>
 </html>

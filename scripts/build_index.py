@@ -1,137 +1,224 @@
-"""
-Build vector index from chunks using OpenAI embeddings and ChromaDB.
+"""Build Qdrant vector index from chunks using Gemini embeddings.
+Hybrid: dense (Gemini) + sparse (TF with IDF modifier).
+Supports resume via --fresh flag to force rebuild.
 """
 import json
 import os
 import sys
 import time
+from collections import Counter
 
-import chromadb
-from openai import OpenAI
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from google import genai
 from dotenv import load_dotenv
+from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    Distance, VectorParams, SparseVectorParams, Modifier,
+    PointStruct, SparseVector, NamedVector, NamedSparseVector,
+    PayloadSchemaType,
+)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 CHUNKS_FILE = os.path.join(PROJECT_ROOT, "data", "chunks", "all_chunks.json")
-CHROMA_DIR = os.path.join(PROJECT_ROOT, "data", "chromadb")
+VOCAB_FILE = os.path.join(PROJECT_ROOT, "data", "vocab.json")
 COLLECTION_NAME = "dat_dai_law"
-EMBEDDING_MODEL = "text-embedding-3-small"
-BATCH_SIZE = 50  # OpenAI embedding API batch limit
+EMBEDDING_MODEL = "gemini-embedding-001"
+BATCH_SIZE = 10
+WAIT_BETWEEN_BATCHES = 4
+
+import re
+
+def tokenize_vi(text: str) -> list[str]:
+    text = text.lower()
+    text = re.sub(r"[^\w\sàáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]", " ", text)
+    return [w for w in text.split() if len(w) > 1]
+
+
+def build_vocab(chunks: list[dict]) -> dict:
+    """Build vocabulary mapping token -> index from all chunks."""
+    all_tokens = set()
+    for chunk in chunks:
+        tokens = tokenize_vi(chunk.get("content", ""))
+        all_tokens.update(tokens)
+    vocab = {token: idx for idx, token in enumerate(sorted(all_tokens))}
+    return vocab
+
+
+def text_to_sparse(text: str, vocab: dict) -> SparseVector:
+    tokens = tokenize_vi(text)
+    counts = Counter(tokens)
+    indices = []
+    values = []
+    for token, count in sorted(counts.items()):
+        if token in vocab:
+            indices.append(vocab[token])
+            values.append(float(count))
+    return SparseVector(indices=indices, values=values)
 
 
 def load_chunks() -> list[dict]:
-    """Load chunks from JSON file."""
     if not os.path.exists(CHUNKS_FILE):
         print(f"Khong tim thay file chunks: {CHUNKS_FILE}")
         print("Hay chay chunk_documents.py truoc.")
         sys.exit(1)
-
     with open(CHUNKS_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def create_embeddings(texts: list[str], client: OpenAI) -> list[list[float]]:
-    """Create embeddings for a batch of texts using OpenAI API."""
-    response = client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=texts,
-    )
-    return [item.embedding for item in response.data]
-
-
 def main():
-    # Check API key
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or api_key == "sk-your-key-here":
-        print("Loi: Chua cau hinh OPENAI_API_KEY trong file .env")
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        print("Loi: Chua cau hinh GEMINI_API_KEY trong file .env")
         sys.exit(1)
 
-    client = OpenAI(api_key=api_key)
+    gemini = genai.Client(api_key=api_key)
 
-    # Load chunks
     chunks = load_chunks()
     print(f"Da load {len(chunks)} chunks")
 
-    # Setup ChromaDB
-    os.makedirs(CHROMA_DIR, exist_ok=True)
-    chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
+    # Build vocabulary for sparse vectors
+    print("Xay dung vocabulary...")
+    vocab = build_vocab(chunks)
+    print(f"Vocabulary: {len(vocab)} tokens")
 
-    # Delete existing collection if exists, then recreate
-    try:
-        chroma_client.delete_collection(COLLECTION_NAME)
-        print(f"Da xoa collection cu: {COLLECTION_NAME}")
-    except Exception:
-        pass
+    # Save vocab for runtime use
+    os.makedirs(os.path.dirname(VOCAB_FILE), exist_ok=True)
+    with open(VOCAB_FILE, "w", encoding="utf-8") as f:
+        json.dump(vocab, f, ensure_ascii=False)
 
-    collection = chroma_client.create_collection(
-        name=COLLECTION_NAME,
-        metadata={"description": "Van ban phap luat dat dai Viet Nam"},
+    # Setup Qdrant cloud
+    qdrant_url = os.getenv("QDRANT_URL", ":memory:")
+    qdrant_key = os.getenv("QDRANT_API_KEY", "")
+    if qdrant_url and qdrant_url != ":memory:":
+        client = QdrantClient(url=qdrant_url, api_key=qdrant_key or None)
+    else:
+        client = QdrantClient(location=":memory:")
+
+    # Get embedding dimension from a test embed
+    print("Kiem tra embedding dimension...")
+    test_result = gemini.models.embed_content(
+        model=EMBEDDING_MODEL,
+        contents=["test"],
+    )
+    dim = len(test_result.embeddings[0].values)
+    print(f"Embedding dimension: {dim}")
+
+    # Create collection
+    if client.collection_exists(COLLECTION_NAME):
+        if "--fresh" in sys.argv:
+            client.delete_collection(COLLECTION_NAME)
+            print("Da xoa collection cu")
+        else:
+            info = client.get_collection(COLLECTION_NAME)
+            if info.points_count >= len(chunks):
+                print(f"Collection da co {info.points_count} points. Da xong!")
+                return
+            print(f"Collection co {info.points_count} points, can {len(chunks)}. Xay lai...")
+            client.delete_collection(COLLECTION_NAME)
+
+    client.create_collection(
+        collection_name=COLLECTION_NAME,
+        vectors_config={
+            "dense": VectorParams(size=dim, distance=Distance.COSINE),
+        },
+        sparse_vectors_config={
+            "sparse": SparseVectorParams(modifier=Modifier.IDF),
+        },
     )
 
-    # Process in batches
-    total_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
-    print(f"Tao embeddings va luu vao ChromaDB ({total_batches} batches)...")
+    # Create payload indexes for filtering
+    client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="doc_name",
+        field_schema=PayloadSchemaType.KEYWORD,
+    )
+    client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="dieu",
+        field_schema=PayloadSchemaType.KEYWORD,
+    )
 
+    # Index in batches
+    total_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
+    print(f"Indexing {len(chunks)} chunks ({total_batches} batches)...")
+
+    indexed = 0
     for i in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[i : i + BATCH_SIZE]
         batch_num = i // BATCH_SIZE + 1
 
-        # Prepare texts for embedding - use content + metadata for better retrieval
+        # Prepare texts for embedding
         texts = []
         for chunk in batch:
-            # Prepend metadata to content for richer embedding
             prefix = chunk.get("metadata_str", "")
             content = chunk.get("content", "")
-            texts.append(f"{prefix}\n\n{content}" if prefix else content)
+            text = f"{prefix}\n\n{content}" if prefix else content
+            if len(text) > 8000:
+                text = text[:8000]
+            texts.append(text)
 
-        # Create embeddings with retry
-        for attempt in range(3):
+        # Get embeddings with retry
+        embeddings = None
+        for attempt in range(5):
             try:
-                embeddings = create_embeddings(texts, client)
+                result = gemini.models.embed_content(
+                    model=EMBEDDING_MODEL,
+                    contents=texts,
+                )
+                embeddings = [e.values for e in result.embeddings]
                 break
             except Exception as e:
-                if attempt < 2:
-                    print(f"  Loi, thu lai sau 5 giay... ({e})")
-                    time.sleep(5)
+                error_str = str(e)
+                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                    wait = 15 * (attempt + 1)
+                    print(f"  Rate limit, doi {wait}s... (batch {batch_num})", flush=True)
+                    time.sleep(wait)
+                elif attempt < 4:
+                    wait = 5 * (attempt + 1)
+                    print(f"  Loi, thu lai sau {wait}s... ({e})", flush=True)
+                    time.sleep(wait)
                 else:
-                    print(f"  Loi khong the khac phuc: {e}")
-                    raise
+                    print(f"  Loi khong khac phuc: {e}", flush=True)
+                    print(f"  Da index {indexed} chunks. Chay lai de tiep tuc.")
+                    return
 
-        # Prepare data for ChromaDB
-        ids = [f"chunk_{i + j}" for j in range(len(batch))]
-        documents = [chunk["content"] for chunk in batch]
-        metadatas = [
-            {
-                "doc_name": chunk.get("doc_name", ""),
-                "chapter": chunk.get("chapter", ""),
-                "dieu": chunk.get("dieu", ""),
-                "dieu_title": chunk.get("dieu_title", ""),
-                "khoan": chunk.get("khoan", ""),
-                "metadata_str": chunk.get("metadata_str", ""),
-            }
-            for chunk in batch
-        ]
+        if embeddings is None:
+            print(f"  Batch {batch_num} that bai. Da index {indexed}.")
+            return
 
-        collection.add(
-            ids=ids,
-            embeddings=embeddings,
-            documents=documents,
-            metadatas=metadatas,
-        )
+        # Build points
+        points = []
+        for j, chunk in enumerate(batch):
+            sparse = text_to_sparse(chunk.get("content", ""), vocab)
+            points.append(PointStruct(
+                id=i + j,
+                vector={
+                    "dense": embeddings[j],
+                    "sparse": sparse,
+                },
+                payload={
+                    "text": chunk.get("content", ""),
+                    "doc_name": chunk.get("doc_name", ""),
+                    "chapter": chunk.get("chapter", ""),
+                    "dieu": chunk.get("dieu", ""),
+                    "dieu_title": chunk.get("dieu_title", ""),
+                    "khoan": chunk.get("khoan", ""),
+                    "metadata_str": chunk.get("metadata_str", ""),
+                },
+            ))
 
-        print(f"  Batch {batch_num}/{total_batches}: {len(batch)} chunks")
+        client.upsert(collection_name=COLLECTION_NAME, points=points)
+        indexed += len(batch)
+        print(f"  Batch {batch_num}/{total_batches}: {len(batch)} chunks (tong: {indexed})", flush=True)
 
-        # Rate limiting - avoid hitting OpenAI API limits
         if batch_num < total_batches:
-            time.sleep(0.5)
+            time.sleep(WAIT_BETWEEN_BATCHES)
 
-    print(f"\nHoan thanh! Da luu {len(chunks)} chunks vao ChromaDB tai: {CHROMA_DIR}")
-    print(f"Collection: {COLLECTION_NAME}")
-
-    # Verify
-    count = collection.count()
-    print(f"Xac nhan: {count} documents trong collection")
+    info = client.get_collection(COLLECTION_NAME)
+    print(f"\nHoan thanh! {info.points_count} points trong Qdrant tai: {QDRANT_PATH}")
 
 
 if __name__ == "__main__":

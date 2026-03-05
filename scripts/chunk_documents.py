@@ -7,20 +7,21 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW_DIR = os.path.join(PROJECT_ROOT, "data", "raw")
 CHUNKS_DIR = os.path.join(PROJECT_ROOT, "data", "chunks")
 
 # Regex patterns for Vietnamese legal document structure
-# Matches: "Điều 1.", "Điều 12.", "Điều 123." etc.
+# Matches: "Điều 1.", "Điều 12.", "Điều 123." etc. (with optional OCR noise prefix)
 DIEU_PATTERN = re.compile(
-    r"^(Điều\s+\d+)\.\s*(.*)$", re.MULTILINE
+    r"^[^\w]*?(Điều\s+\d+)\.\s*(.*)$", re.MULTILINE
 )
 
-# Matches: "Chương I", "Chương II", "CHƯƠNG I" etc. (Roman or Arabic numerals)
+# Matches: "Chương I", "Chương II", "CHƯƠNG I", OCR variants
 CHUONG_PATTERN = re.compile(
-    r"^(?:CHƯƠNG|Chương)\s+([IVXLCDM]+|\d+)\s*$", re.MULTILINE | re.IGNORECASE
+    r"^(?:CHƯƠNG|Chương|CHUONG|Chuong)\s+([IVXLCDM]+|\d+)\s*$", re.MULTILINE | re.IGNORECASE
 )
 
 # Matches clause numbers: "1.", "2.", "3." at the start of a line (Khoan)
@@ -44,18 +45,38 @@ DOC_NAME_MAP = {
 
 
 def clean_text(text: str) -> str:
-    """Remove page markers and clean up whitespace."""
-    # Remove page markers
+    """Remove page markers, OCR artifacts, and clean up whitespace."""
+    # Remove page markers from extraction
     text = re.sub(r"--- Trang \d+ ---\n?", "", text)
+    # Remove digital signature metadata blocks
+    text = re.sub(r"Người ký:.*?(?:\n.*?){0,5}Thời gian ký:.*?\n", "", text, flags=re.DOTALL)
+    # Remove common OCR noise characters
+    text = re.sub(r"[|]{2,}", "", text)
+    text = re.sub(r"\.{4,}", "", text)
+    # Remove stray pipe, backtick, underscore at end of lines (OCR artifacts)
+    text = re.sub(r"\s*[|`_¬ˆ]+\s*$", "", text, flags=re.MULTILINE)
+    # Remove lines that are just OCR garbage (short non-Vietnamese fragments)
+    text = re.sub(r"^[|`_¬ˆ\s\-\.]{1,5}$", "", text, flags=re.MULTILINE)
+    # Fix OCR "ó." -> "6." pattern (common misread)
+    text = re.sub(r"^ó\.", "6.", text, flags=re.MULTILINE)
+    text = re.sub(r"^§\.", "8.", text, flags=re.MULTILINE)
+    # Fix common OCR misreads for Vietnamese diacritics
+    text = re.sub(r"(?<!\w)Diéu(?!\w)", "Điều", text)
+    text = re.sub(r"(?<!\w)Dieu(?!\w)", "Điều", text)
     # Normalize whitespace but keep paragraph structure
+    text = re.sub(r" {3,}", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
+    # Remove lines that are just numbers (page numbers from OCR)
+    text = re.sub(r"^\d{1,3}\s*$", "", text, flags=re.MULTILINE)
     return text.strip()
 
 
 def get_doc_name(filename: str) -> str:
     """Get a clean document name from filename."""
     base = os.path.splitext(filename)[0]
-    return DOC_NAME_MAP.get(base, base)
+    # Normalize Unicode (macOS uses NFD, our keys are NFC)
+    base_nfc = unicodedata.normalize("NFC", base)
+    return DOC_NAME_MAP.get(base_nfc, DOC_NAME_MAP.get(base, base_nfc))
 
 
 def find_chapters(text: str) -> list[dict]:
