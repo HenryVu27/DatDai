@@ -70,12 +70,21 @@ Ban co the goi cac tool sau de tra cuu thong tin. Tra ve JSON hop le.
    Params: {"doc_id": "ldd2024", "dieu": "Dieu 79"}
    - Dung khi biet chinh xac dieu va van ban can tra cuu
 
-KHONG goi tool khi:
-- Nguoi dung chao hoi, cam on, noi chuyen xa giao
-- Cau tra loi da co trong lich su hoi thoai gan day
-- Chi can lam ro hoac hoi lai cau hoi cua nguoi dung
-- Nguoi dung hoi ve noi dung ban vua tra loi
-</tools>"""
+Chon tool phu hop:
+- Biet chinh xac dieu + van ban -> lookup_specific_dieu
+- Hoi ve sua doi giua cac ND -> lookup_amendment (+ search_legal_docs neu can them context)
+- Cau hoi chung, khong biet dieu cu the -> search_legal_docs
+- Cau hoi phuc tap, nhieu van ban -> nhieu tool cung luc
+</tools>
+
+<retrieval-policy>
+QUY TAC BAT BUOC:
+- BAT KY cau hoi lien quan den phap luat, dieu khoan, thu tuc, quyen, nghia vu, dat dai -> PHAI goi it nhat mot tool
+- KHONG BAO GIO tu tra loi cau hoi phap luat tu kien thuc cua ban - LUON tra cuu truoc
+- direct_response CHI dung cho: chao hoi, cam on, tam biet, noi chuyen xa giao, hoac hoi lai de lam ro cau hoi mo ho
+- Khi nguoi dung hoi tiep ve noi dung vua tra loi (lam ro, giai thich them) -> van PHAI goi tool de dam bao chinh xac
+- Khi khong chac co can tra cuu khong -> GOI TOOL (an toan hon la tu tra loi sai)
+</retrieval-policy>"""
 
 ORCHESTRATOR_INSTRUCTIONS = """
 <instructions>
