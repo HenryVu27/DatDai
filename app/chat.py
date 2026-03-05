@@ -7,6 +7,7 @@ Two-stage pipeline:
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 
@@ -123,6 +124,30 @@ OUTPUT: {"reasoning": "Hoi ve sua doi giua 2 ND, can lookup_amendment va search"
 INPUT: "Cam on ban"
 OUTPUT: {"reasoning": "Cam on, xa giao", "actions": [], "complexity": "simple", "summary_update": null, "direct_response": "Khong co gi! Neu ban co them cau hoi ve Luat Dat Dai, hay hoi bat cu luc nao."}
 </examples>"""
+
+
+# -- Legal keyword guardrail --
+
+LEGAL_KEYWORDS = re.compile(
+    r"(?:điều|dieu|đ\.\s*\d|luật|luat|nghị định|nghi dinh|nđ|nd\s*\d+"
+    r"|quyền|quyen|thu hồi|thu hoi|bồi thường|boi thuong"
+    r"|giấy chứng nhận|giay chung nhan|sử dụng đất|su dung dat"
+    r"|tiền thuê|tien thue|chuyển nhượng|chuyen nhuong"
+    r"|quy hoạch|quy hoach|giải phóng mặt bằng|giai phong mat bang"
+    r"|đất đai|dat dai|thửa đất|thua dat|cấp đất|cap dat|giao đất|giao dat"
+    r"|nghị quyết|nghi quyet|khiếu nại|khieu nai|tranh chấp|tranh chap"
+    r"|đăng ký|dang ky|sổ đỏ|so do|sổ hồng|so hong)",
+    re.IGNORECASE,
+)
+
+
+def _should_force_retrieval(user_message: str, decision: dict) -> bool:
+    """Check if a direct_response should be overridden with retrieval."""
+    if not decision.get("direct_response"):
+        return False
+    if decision.get("actions"):
+        return False
+    return bool(LEGAL_KEYWORDS.search(user_message))
 
 
 # -- Context assembly --
@@ -350,6 +375,24 @@ async def handle_message(session_id: str, user_message: str) -> dict:
         len(decision["actions"]), bool(decision["direct_response"]),
         time.monotonic() - t_orch,
     )
+
+    # Guardrail: force retrieval if orchestrator tried to answer a legal question directly
+    if _should_force_retrieval(user_message, decision):
+        filters = extract_filters(user_message)
+        logger.warning(
+            "[%s] Guardrail triggered: forcing retrieval for legal question answered directly",
+            session_id[:8],
+        )
+        decision = {
+            "reasoning": "Guardrail: legal question requires retrieval",
+            "actions": [{"tool": "search_legal_docs", "query": user_message, "filters": {
+                "doc_ids": filters.get("doc_ids"),
+                "dieu": filters.get("dieu"),
+            }}],
+            "complexity": decision.get("complexity", "simple"),
+            "summary_update": decision.get("summary_update"),
+            "direct_response": None,
+        }
 
     # Save summary update if provided
     if decision["summary_update"]:
