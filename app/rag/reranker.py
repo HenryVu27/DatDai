@@ -3,6 +3,8 @@ import asyncio
 import logging
 import math
 
+from app.observability import observe
+
 logger = logging.getLogger(__name__)
 
 
@@ -12,6 +14,7 @@ class CrossEncoderReranker:
         self._model = TextCrossEncoder(model_name=model_name)
         logger.info("CrossEncoderReranker loaded (model=%s)", model_name)
 
+    @observe(name="rerank")
     async def rerank(self, query: str, candidates: list[dict], top_k: int) -> list[dict]:
         if not candidates:
             return []
