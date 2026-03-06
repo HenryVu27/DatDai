@@ -9,6 +9,7 @@ from app.config import (
     ORCHESTRATOR_MODEL, GENERATOR_PRO_MODEL, GENERATOR_FLASH_MODEL, UTILITY_MODEL,
     FALLBACK_PRO_MODEL, FALLBACK_FLASH_MODEL, FALLBACK_UTILITY_MODEL,
 )
+from app.observability import observe
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ _TIMEOUT = {"pro": 45, "flash": 30, "orchestrator": 30, "utility": 30}
 _EMBED_TIMEOUT = 15
 
 
+@observe(as_type="generation")
 async def generate(
     prompt: str,
     system: str = "",
@@ -86,6 +88,7 @@ async def generate(
     return ""
 
 
+@observe(name="embed")
 async def embed(texts: list[str]) -> list[list[float]]:
     """Create embeddings using Gemini embedding model."""
     client = get_client()
