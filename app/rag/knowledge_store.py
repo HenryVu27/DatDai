@@ -1,7 +1,5 @@
 """Qdrant client wrapper for search operations at runtime."""
-import json
 import logging
-import os
 import re
 from collections import Counter
 
@@ -11,18 +9,16 @@ from qdrant_client.models import (
     MatchAny, MatchValue, Prefetch, SparseVector,
 )
 
-from app.config import QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION, PROJECT_ROOT
+from app.config import QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION
+from app.storage import load_vocab
 
 logger = logging.getLogger(__name__)
-
-VOCAB_FILE = os.path.join(PROJECT_ROOT, "data", "vocab.json")
 
 
 class KnowledgeStore:
     def __init__(self):
         self._client: QdrantClient | None = None
-        self._vocab: dict[str, int] = {}
-        self._load_vocab()
+        self._vocab = load_vocab()
 
     def _get_client(self) -> QdrantClient:
         if self._client is None:
@@ -31,11 +27,6 @@ class KnowledgeStore:
             else:
                 self._client = QdrantClient(location=":memory:")
         return self._client
-
-    def _load_vocab(self):
-        if os.path.exists(VOCAB_FILE):
-            with open(VOCAB_FILE, "r", encoding="utf-8") as f:
-                self._vocab = json.load(f)
 
     @property
     def has_sparse(self) -> bool:
