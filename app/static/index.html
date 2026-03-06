@@ -690,11 +690,11 @@ async function handleSubmit(e) {
     removeTyping();
 
     if (res.status === 429) {
-      throw new Error('Ban gui qua nhieu yeu cau. Vui long cho 1 phut roi thu lai.');
+      throw new Error('Bạn gửi quá nhiều yêu cầu. Vui lòng chờ 1 phút rồi thử lại.');
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Loi server');
+      throw new Error(err.detail || 'Lỗi server');
     }
 
     const data = await res.json();

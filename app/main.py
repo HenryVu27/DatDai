@@ -27,7 +27,7 @@ app.state.limiter = limiter
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
     return JSONResponse(
         status_code=429,
-        content={"detail": "Qua nhieu yeu cau. Vui long thu lai sau 1 phut."},
+        content={"detail": "Quá nhiều yêu cầu. Vui lòng thử lại sau 1 phút."},
     )
 
 
