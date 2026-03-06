@@ -19,6 +19,7 @@ from app.rag.retriever import (
 )
 from app.rag.query_rewriter import extract_filters
 from app.rag.citation_check import verify_citations
+from app.observability import observe, score_current_trace
 
 logger = logging.getLogger(__name__)
 
@@ -153,12 +154,12 @@ def _should_force_retrieval(user_message: str, decision: dict) -> bool:
 
 # -- Context assembly --
 
-def _assemble_conversation_context(history: list[dict], session_id: str) -> tuple[list[dict], str | None]:
+async def _assemble_conversation_context(history: list[dict], session_id: str) -> tuple[list[dict], str | None]:
     """Build trimmed conversation context and retrieve summary.
 
     Returns (recent_messages, summary_text).
     """
-    summary_row = db.get_latest_summary(session_id)
+    summary_row = await asyncio.to_thread(db.get_latest_summary, session_id)
     summary_text = summary_row["summary"] if summary_row else None
 
     # Convert to simple dicts
@@ -346,22 +347,20 @@ async def _execute_tools(actions: list[dict]) -> list[dict]:
 
 # -- Main entry point --
 
+@observe(name="handle_message")
 async def handle_message(session_id: str, user_message: str) -> dict:
     """Process a user message through the orchestrator pipeline."""
     t_start = time.monotonic()
 
     # Ensure session exists
-    db.create_session(session_id)
+    await asyncio.to_thread(db.create_session, session_id)
 
-    # Get conversation history and turn count
-    history = db.get_messages(session_id)
-    turn = db.get_turn_count(session_id) + 1
-
-    # Save user message
-    db.add_message(session_id, turn, "user", user_message)
+    # Get conversation history and derive turn count
+    history = await asyncio.to_thread(db.get_messages, session_id)
+    turn = max((m["turn"] for m in history), default=0) + 1
 
     # Assemble conversation context
-    recent_messages, summary = _assemble_conversation_context(history, session_id)
+    recent_messages, summary = await _assemble_conversation_context(history, session_id)
 
     # -- Stage 1: Orchestrator --
     t_orch = time.monotonic()
@@ -405,15 +404,16 @@ async def handle_message(session_id: str, user_message: str) -> dict:
 
     # Save summary update if provided
     if decision["summary_update"]:
-        db.upsert_summary(session_id, decision["summary_update"], turn)
+        await asyncio.to_thread(db.upsert_summary, session_id, decision["summary_update"], turn)
 
     # -- Direct response path --
     if decision["direct_response"]:
         response = decision["direct_response"]
-        db.add_message(session_id, turn, "assistant", response, [])
+        await asyncio.to_thread(db.add_message, session_id, turn, "user", user_message)
+        await asyncio.to_thread(db.add_message, session_id, turn, "assistant", response, [])
 
         if turn == 1:
-            await _generate_title(session_id, user_message, response)
+            asyncio.create_task(_generate_title(session_id, user_message, response))
 
         return {"answer": response, "sources": [], "session_id": session_id}
 
@@ -438,7 +438,7 @@ async def handle_message(session_id: str, user_message: str) -> dict:
         history=gen_history,
         model=model,
         temperature=0.3,
-        max_tokens=8000,
+        max_tokens=6000,
     )
     logger.info("[%s] generator (%s): %d chars (%.1fs)", session_id[:8], model, len(response), time.monotonic() - t_gen)
 
@@ -447,18 +447,33 @@ async def handle_message(session_id: str, user_message: str) -> dict:
     if cite_meta.get("unverified"):
         logger.warning("[%s] Unverified citations: %s", session_id[:8], cite_meta["unverified"])
 
-    # Save assistant response
-    db.add_message(session_id, turn, "assistant", response, sources)
+    # Save user + assistant messages in a single transaction
+    await asyncio.to_thread(db.add_messages_batch, session_id, [
+        (turn, "user", user_message, None),
+        (turn, "assistant", response, sources),
+    ])
 
     # Auto-generate title for new sessions
     if turn == 1:
-        await _generate_title(session_id, user_message, response)
+        asyncio.create_task(_generate_title(session_id, user_message, response))
+
+    # -- Heuristic scores for Langfuse --
+    score_current_trace("retrieval_count", float(len(chunks)))
+    score_current_trace("response_length", float(len(response)))
+    score_current_trace("has_sources", 1.0 if sources else 0.0)
+    score_current_trace("model_used", 1.0 if model == "pro" else 0.0, comment=model)
+    reranked = [c for c in chunks if c.get("score", 0) > 0]
+    if reranked:
+        scores = [c["score"] for c in reranked]
+        score_current_trace("reranker_top_score", max(scores))
+        score_current_trace("reranker_mean_score", sum(scores) / len(scores))
 
     logger.info("[%s] total turn time: %.1fs", session_id[:8], time.monotonic() - t_start)
 
     return {"answer": response, "sources": sources, "session_id": session_id}
 
 
+@observe(name="generate_title")
 async def _generate_title(session_id: str, question: str, answer: str) -> None:
     """Auto-generate a session title from first exchange."""
     try:
@@ -470,7 +485,7 @@ Cau hoi: {question[:200]}
 Tieu de:"""
         title = await llm.generate(prompt, model="utility", temperature=0.0, max_tokens=60)
         if title and len(title.strip()) > 3:
-            db.update_session_title(session_id, title.strip()[:80])
+            await asyncio.to_thread(db.update_session_title, session_id, title.strip()[:80])
     except Exception:
         pass
 
