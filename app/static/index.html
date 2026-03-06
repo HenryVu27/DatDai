@@ -674,6 +674,8 @@ async function handleSubmit(e) {
   addTyping();
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90000);
     const res = await fetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -681,7 +683,9 @@ async function handleSubmit(e) {
         question,
         session_id: currentSessionId
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
 
     removeTyping();
 
@@ -704,7 +708,10 @@ async function handleSubmit(e) {
     setTimeout(loadSessions, 1000);
   } catch (err) {
     removeTyping();
-    addMessage('assistant', `Xin lỗi, đã xảy ra lỗi: ${err.message}. Vui lòng thử lại.`);
+    const msg = err.name === 'AbortError'
+      ? 'Xin lỗi, yêu cầu đã hết thời gian chờ. Vui lòng thử lại.'
+      : `Xin lỗi, đã xảy ra lỗi: ${err.message}. Vui lòng thử lại.`;
+    addMessage('assistant', msg);
   }
 
   isLoading = false;
