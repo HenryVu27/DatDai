@@ -47,10 +47,10 @@ jobs:
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
-            --memory 1Gi \
+            --memory 2Gi \
             --cpu 1 \
             --max-instances 3 \
             --min-instances 0 \
-            --concurrency 10 \
+            --concurrency 5 \
             --timeout 120 \
             --set-secrets "GEMINI_API_KEY=GEMINI_API_KEY:latest,QDRANT_URL=QDRANT_URL:latest,QDRANT_API_KEY=QDRANT_API_KEY:latest,SUPABASE_DB_URL=SUPABASE_DB_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest"
