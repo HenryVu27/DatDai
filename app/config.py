@@ -24,7 +24,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 RAW_DIR = os.path.join(DATA_DIR, "raw")
 CHUNKS_DIR = os.path.join(DATA_DIR, "chunks")
-DB_PATH = os.path.join(DATA_DIR, "chat.db")
+# Database -- prefer Supabase PostgreSQL, fall back to local SQLite
+SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL", "")
+DB_PATH = os.path.join(DATA_DIR, "chat.db")  # SQLite fallback for local dev
+
+# Supabase Storage
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 
 # Qdrant
 QDRANT_URL = os.getenv("QDRANT_URL", ":memory:")
