@@ -8,14 +8,27 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from app import chat, db
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Chatbot Luat Dat Dai")
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Qua nhieu yeu cau. Vui long thu lai sau 1 phut."},
+    )
 
 
 class ChatRequest(BaseModel):
@@ -38,14 +51,15 @@ class SessionResponse(BaseModel):
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
-    if not request.question.strip():
+@limiter.limit("10/minute")
+async def chat_endpoint(request: Request, chat_request: ChatRequest):
+    if not chat_request.question.strip():
         raise HTTPException(status_code=400, detail="Cau hoi khong duoc de trong.")
 
-    session_id = request.session_id or chat.create_new_session()
+    session_id = chat_request.session_id or chat.create_new_session()
 
     try:
-        result = await chat.handle_message(session_id, request.question)
+        result = await chat.handle_message(session_id, chat_request.question)
         return ChatResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Loi xu ly cau hoi: {str(e)}")
