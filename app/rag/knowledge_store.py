@@ -23,7 +23,7 @@ class KnowledgeStore:
     def _get_client(self) -> QdrantClient:
         if self._client is None:
             if QDRANT_URL and QDRANT_URL != ":memory:":
-                self._client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY or None)
+                self._client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY or None, timeout=15)
             else:
                 self._client = QdrantClient(location=":memory:")
         return self._client

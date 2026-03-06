@@ -1,4 +1,5 @@
 """Gemini LLM client with model routing and fallback."""
+import asyncio
 import logging
 from google import genai
 from google.genai import types
@@ -29,6 +30,11 @@ def get_client() -> genai.Client:
     return _client
 
 
+# Timeouts per model role (seconds)
+_TIMEOUT = {"pro": 45, "flash": 30, "orchestrator": 30, "utility": 30}
+_EMBED_TIMEOUT = 15
+
+
 async def generate(
     prompt: str,
     system: str = "",
@@ -40,6 +46,7 @@ async def generate(
     """Generate a response using Gemini with automatic fallback."""
     client = get_client()
     primary, fallback = MODEL_MAP.get(model, (GENERATOR_FLASH_MODEL, FALLBACK_FLASH_MODEL))
+    timeout = _TIMEOUT.get(model, 30)
 
     contents = []
     if history:
@@ -56,10 +63,19 @@ async def generate(
 
     for model_id in (primary, fallback):
         try:
-            response = client.models.generate_content(
-                model=model_id, contents=contents, config=config,
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.models.generate_content,
+                    model=model_id, contents=contents, config=config,
+                ),
+                timeout=timeout,
             )
             return response.text or ""
+        except asyncio.TimeoutError:
+            logger.warning("Model %s timed out after %ds", model_id, timeout)
+            if model_id == primary:
+                continue
+            raise TimeoutError(f"Gemini generation timed out after {timeout}s")
         except Exception as e:
             if model_id == primary:
                 logger.warning("Primary model %s failed, trying fallback %s: %s", primary, fallback, e)
@@ -70,8 +86,13 @@ async def generate(
     return ""
 
 
-def embed(texts: list[str]) -> list[list[float]]:
+async def embed(texts: list[str]) -> list[list[float]]:
     """Create embeddings using Gemini embedding model."""
     client = get_client()
-    result = client.models.embed_content(model=EMBEDDING_MODEL, contents=texts)
+    result = await asyncio.wait_for(
+        asyncio.to_thread(
+            client.models.embed_content, model=EMBEDDING_MODEL, contents=texts,
+        ),
+        timeout=_EMBED_TIMEOUT,
+    )
     return [e.values for e in result.embeddings]

@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from functools import lru_cache
 
 from app.config import SUPABASE_URL, SUPABASE_SERVICE_KEY, DATA_DIR
@@ -9,6 +10,7 @@ from app.config import SUPABASE_URL, SUPABASE_SERVICE_KEY, DATA_DIR
 log = logging.getLogger(__name__)
 
 _BUCKET = "datdai-data"
+_DOWNLOAD_TIMEOUT = 30  # seconds
 
 
 def _get_storage_client():
@@ -25,7 +27,12 @@ def _load_json(remote_path: str, local_path: str) -> dict | list:
     storage = _get_storage_client()
     if storage:
         log.info("Loading %s from Supabase Storage", remote_path)
-        data = storage.from_(_BUCKET).download(remote_path)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(storage.from_(_BUCKET).download, remote_path)
+            try:
+                data = future.result(timeout=_DOWNLOAD_TIMEOUT)
+            except FuturesTimeoutError:
+                raise TimeoutError(f"Supabase download of {remote_path} timed out after {_DOWNLOAD_TIMEOUT}s")
         return json.loads(data)
     log.info("Loading %s from local filesystem", local_path)
     with open(local_path, "r", encoding="utf-8") as f:

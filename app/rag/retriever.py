@@ -49,7 +49,7 @@ async def search_legal_docs(
     store = _get_store()
 
     # Embed the query
-    query_embedding = llm.embed([query])[0]
+    query_embedding = (await llm.embed([query]))[0]
 
     # Hybrid search
     fetch_k = RAG_RERANK_CANDIDATES if _get_reranker() else top_k
