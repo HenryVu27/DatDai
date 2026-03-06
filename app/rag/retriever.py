@@ -10,6 +10,7 @@ from app.rag.knowledge_store import KnowledgeStore
 from app.rag.reranker import CrossEncoderReranker
 from app.rag.cross_ref import AMENDED_BY
 from app.rag.amendment_index import get_amendment_chunk_ids, get_all_amendment_chunk_ids_to
+from app.observability import observe
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ def _get_reranker() -> CrossEncoderReranker | None:
     return _reranker
 
 
+@observe(name="search_legal_docs")
 async def search_legal_docs(
     query: str,
     doc_ids: list[str] | None = None,
@@ -89,6 +91,7 @@ async def search_legal_docs(
     return chunks
 
 
+@observe(name="lookup_amendment")
 def lookup_amendment(
     target_doc: str,
     source_doc: str | None = None,
@@ -128,6 +131,7 @@ def lookup_amendment(
     return chunks
 
 
+@observe(name="lookup_specific_dieu")
 def lookup_specific_dieu(doc_id: str, dieu: str) -> list[dict]:
     """Fetch all chunks for a specific Dieu from a specific document.
 
