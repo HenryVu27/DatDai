@@ -5,40 +5,16 @@ Loads data/amendment_index.json at startup and provides functions to:
 - Get chunk IDs for amendment-related retrieval
 - Detect amendment-related queries from user input
 """
-import json
 import logging
-import os
 import re
+
+from app.storage import load_amendment_index
 
 logger = logging.getLogger(__name__)
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_INDEX_PATH = os.path.join(_PROJECT_ROOT, "data", "amendment_index.json")
 
-# The loaded index: {"nd226->nd71": {"source_doc": ..., "target_doc": ..., "amendments": [...]}}
-_index: dict[str, dict] = {}
-
-
-def _load_index() -> None:
-    """Load the amendment index from disk. Called once at module import."""
-    global _index
-    if not os.path.exists(_INDEX_PATH):
-        logger.warning("Amendment index not found at %s. Run scripts/chunk_md.py first.", _INDEX_PATH)
-        return
-    try:
-        with open(_INDEX_PATH, "r", encoding="utf-8") as f:
-            _index = json.load(f)
-        total = sum(len(v["amendments"]) for v in _index.values())
-        logger.info(
-            "Loaded amendment index: %d relationships, %d amendment entries",
-            len(_index), total,
-        )
-    except Exception:
-        logger.exception("Failed to load amendment index from %s", _INDEX_PATH)
-
-
-# Load on import
-_load_index()
+def _get_index() -> dict:
+    return load_amendment_index()
 
 
 def get_amendments(source_doc: str, target_doc: str) -> list[dict]:
@@ -53,7 +29,7 @@ def get_amendments(source_doc: str, target_doc: str) -> list[dict]:
         Empty list if no amendments found.
     """
     key = f"{source_doc}->{target_doc}"
-    entry = _index.get(key)
+    entry = _get_index().get(key)
     if entry:
         return entry["amendments"]
     return []
@@ -87,7 +63,7 @@ def get_all_amendments_to(target_doc: str) -> list[dict]:
     with an additional "source_doc" key on each entry.
     """
     results = []
-    for key, entry in _index.items():
+    for key, entry in _get_index().items():
         if entry["target_doc"] == target_doc:
             src = entry["source_doc"]
             for a in entry["amendments"]:
@@ -101,7 +77,7 @@ def get_all_amendment_chunk_ids_to(target_doc: str) -> list[str]:
     """Get all chunk_ids of amendments affecting the given target doc."""
     seen = set()
     result = []
-    for key, entry in _index.items():
+    for key, entry in _get_index().items():
         if entry["target_doc"] == target_doc:
             for a in entry["amendments"]:
                 for cid in a.get("chunk_ids", []):
