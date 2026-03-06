@@ -1,0 +1,14 @@
+.env
+.venv/
+venv/
+data/
+tests/
+scripts/
+docs/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.DS_Store
+models/
+*.md
