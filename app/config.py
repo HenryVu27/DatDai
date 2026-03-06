@@ -32,6 +32,10 @@ DB_PATH = os.path.join(DATA_DIR, "chat.db")  # SQLite fallback for local dev
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 
+# Langfuse observability
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
+
 # Qdrant
 QDRANT_URL = os.getenv("QDRANT_URL", ":memory:")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
