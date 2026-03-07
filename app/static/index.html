@@ -991,14 +991,15 @@ async function handleSubmit(e) {
 
   try {
     currentController = new AbortController();
-    const timeout = setTimeout(() => currentController.abort(), 120000);
+    // 20s to establish TCP connection / get first byte from server
+    const connectTimeout = setTimeout(() => currentController.abort(), 20000);
     const res = await fetch('/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question, session_id: currentSessionId }),
       signal: currentController.signal,
     });
-    clearTimeout(timeout);
+    clearTimeout(connectTimeout);
 
     if (res.status === 429) {
       throw new Error('Bạn gửi quá nhiều yêu cầu. Vui lòng chờ 1 phút rồi thử lại.');
@@ -1012,10 +1013,22 @@ async function handleSubmit(e) {
     const decoder = new TextDecoder();
     let buffer = '';
 
+    // Idle timeout: abort if no SSE data arrives for 60s (e.g., Pro model hangs mid-generation)
+    let idleTimer = null;
+    const IDLE_TIMEOUT_MS = 60000;
+    function resetIdleTimer() {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        if (!userAborted) currentController.abort();
+      }, IDLE_TIMEOUT_MS);
+    }
+    resetIdleTimer();
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
+      resetIdleTimer();
       const parsed = parseSSEBuffer(buffer);
       buffer = parsed.remaining;
 
@@ -1043,9 +1056,11 @@ async function handleSubmit(e) {
       }
     }
 
+    if (idleTimer) clearTimeout(idleTimer);
     finalizeBubble(msgDiv, fullText, streamSources, streamTraceId);
     if (isNewSession) setTimeout(loadSessions, 1500);
   } catch (err) {
+    if (idleTimer) clearTimeout(idleTimer);
     clearBubbleStatus(msgDiv);
     if (err.name === 'AbortError' && userAborted) {
       // User clicked stop -- finalize with whatever partial text we have
@@ -1062,7 +1077,11 @@ async function handleSubmit(e) {
         fullText += '\n\n**Lỗi:** ' + errorMsg;
         finalizeBubble(msgDiv, fullText, streamSources, null);
       } else {
-        msgDiv.querySelector('.bubble').innerHTML = formatContent(errorMsg);
+        // Remove any stale regenerate buttons from prior messages
+        chatArea.querySelectorAll('.feedback-btn.regenerate').forEach(btn => btn.remove());
+        msgDiv.querySelector('.bubble').innerHTML =
+          formatContent(errorMsg) +
+          '<div class="feedback"><button type="button" class="feedback-btn regenerate" onclick="regenerateResponse()" title="Thử lại">&#x21BB; Thử lại</button></div>';
       }
     }
   }
