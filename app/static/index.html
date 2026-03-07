@@ -277,6 +277,29 @@ body { display: flex; }
   line-height: 1.5;
 }
 
+/* Markdown tables */
+.bubble table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.6em 0;
+  font-size: 0.85rem;
+  overflow-x: auto;
+  display: block;
+}
+.bubble th, .bubble td {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+.bubble th {
+  background: var(--bg-warm);
+  font-weight: 600;
+}
+.bubble tr:nth-child(even) td {
+  background: var(--surface-hover);
+}
+
 /* Typing indicator */
 .typing { display: flex; gap: 5px; padding: 0.6rem 0; align-items: center; }
 .typing span {
@@ -809,11 +832,29 @@ function formatContent(text) {
   // Lists
   h = h.replace(/^- (.+)$/gm, '<li>$1</li>');
   h = h.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+  // Tables: matches header row | sep row | data rows...
+  h = h.replace(
+    /^(\|.+\|[ \t]*)(\n\|[-:| \t]+\|[ \t]*)(\n\|.+\|[ \t]*)+/gm,
+    (match) => {
+      const lines = match.trim().split('\n');
+      if (lines.length < 3) return match;
+      const headerCells = lines[0].split('|').slice(1, -1)
+        .map(c => `<th>${c.trim()}</th>`);
+      // lines[1] is the separator row -- skip it
+      const bodyRows = lines.slice(2).map(line => {
+        const cells = line.split('|').slice(1, -1)
+          .map(c => `<td>${c.trim()}</td>`);
+        return `<tr>${cells.join('')}</tr>`;
+      });
+      return `<table><thead><tr>${headerCells.join('')}</tr></thead>`
+        + `<tbody>${bodyRows.join('')}</tbody></table>`;
+    }
+  );
   // Paragraphs
   h = h.split('\n\n').map(p => {
     p = p.trim();
     if (!p) return '';
-    if (p.startsWith('<h') || p.startsWith('<ul')) return p;
+    if (p.startsWith('<h') || p.startsWith('<ul') || p.startsWith('<table')) return p;
     return `<p>${p.replace(/\n/g, '<br>')}</p>`;
   }).join('');
   return h;
