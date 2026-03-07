@@ -408,6 +408,40 @@ body { display: flex; }
   }
   .mobile-overlay.show { display: block; }
 }
+
+/* Status text (streaming) */
+.status-text {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  padding: 0.4rem 0;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* Feedback buttons */
+.feedback {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.feedback-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.feedback-btn:hover { border-color: var(--accent); color: var(--text-secondary); }
+.feedback-btn.selected { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 </style>
 </head>
 <body>
@@ -506,11 +540,14 @@ async function loadSessions() {
     sessions.forEach(s => {
       const div = document.createElement('div');
       div.className = 'session-item' + (s.id === currentSessionId ? ' active' : '');
+      div.dataset.id = s.id;
       div.textContent = s.title || s.first_message || 'Cuộc hội thoại mới';
       div.onclick = () => switchSession(s.id, s.title || s.first_message || 'Cuộc hội thoại mới');
       sessionsList.appendChild(div);
     });
-  } catch(e) {}
+  } catch(e) {
+    sessionsList.innerHTML = '<div style="padding:0.75rem;font-size:0.82rem;color:var(--text-muted)">Không thể tải danh sách hội thoại.</div>';
+  }
 }
 
 async function switchSession(id, title) {
@@ -530,12 +567,20 @@ async function switchSession(id, title) {
     const res = await fetch(`/sessions/${id}/messages`);
     const messages = await res.json();
     messages.forEach(m => {
-      const sources = m.sources ? JSON.parse(m.sources) : [];
+      let sources = [];
+      if (m.sources) {
+        try { sources = JSON.parse(m.sources); } catch(_) {}
+      }
       addMessage(m.role, m.content, sources);
     });
-  } catch(e) {}
+  } catch(e) {
+    addMessage('assistant', 'Không thể tải tin nhắn. Vui lòng thử lại.');
+  }
 
-  loadSessions();
+  // Update active highlight without re-fetching
+  document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+  const active = document.querySelector(`.session-item[data-id="${id}"]`);
+  if (active) active.classList.add('active');
 }
 
 async function newChat() {
@@ -587,7 +632,7 @@ function askSuggestion(btn) {
   document.getElementById('input-form').dispatchEvent(new Event('submit'));
 }
 
-function addMessage(role, content, sources) {
+function addMessage(role, content, sources, traceId) {
   const w = document.getElementById('welcome');
   if (w) w.remove();
 
@@ -610,6 +655,12 @@ function addMessage(role, content, sources) {
       html += `<span class="source-tag">${esc(label)}</span>`;
     });
     html += `</div>`;
+  }
+  if (role === 'assistant' && traceId) {
+    html += `<div class="feedback" data-trace-id="${esc(traceId)}">
+      <button class="feedback-btn" onclick="sendFeedback(this, 1)" title="Hữu ích">&#x1F44D;</button>
+      <button class="feedback-btn" onclick="sendFeedback(this, 0)" title="Chưa tốt">&#x1F44E;</button>
+    </div>`;
   }
   html += `</div>`;
   div.innerHTML = html;
@@ -660,6 +711,123 @@ function esc(t) {
   return d.innerHTML;
 }
 
+async function sendFeedback(btn, score) {
+  const container = btn.closest('.feedback');
+  const traceId = container.dataset.traceId;
+  container.querySelectorAll('.feedback-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  try {
+    await fetch('/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ trace_id: traceId, score }),
+    });
+  } catch(e) {}
+}
+
+function createStreamingBubble() {
+  const w = document.getElementById('welcome');
+  if (w) w.remove();
+  const div = document.createElement('div');
+  div.className = 'message assistant';
+  div.innerHTML = '<div class="bubble"><div class="status-text"></div></div>';
+  chatArea.appendChild(div);
+  chatArea.scrollTop = chatArea.scrollHeight;
+  return div;
+}
+
+function updateBubbleStatus(msgDiv, text) {
+  let statusEl = msgDiv.querySelector('.status-text');
+  if (!statusEl) {
+    statusEl = document.createElement('div');
+    statusEl.className = 'status-text';
+    msgDiv.querySelector('.bubble').prepend(statusEl);
+  }
+  statusEl.textContent = text;
+  chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+function clearBubbleStatus(msgDiv) {
+  const statusEl = msgDiv.querySelector('.status-text');
+  if (statusEl) statusEl.remove();
+}
+
+let _rafPending = false;
+let _rafFullText = '';
+let _rafMsgDiv = null;
+
+function updateBubbleContent(msgDiv, fullText) {
+  _rafFullText = fullText;
+  _rafMsgDiv = msgDiv;
+  if (!_rafPending) {
+    _rafPending = true;
+    requestAnimationFrame(() => {
+      _rafPending = false;
+      const bubble = _rafMsgDiv.querySelector('.bubble');
+      // Preserve status-text if still present
+      const statusEl = bubble.querySelector('.status-text');
+      bubble.innerHTML = formatContent(_rafFullText);
+      if (statusEl) bubble.prepend(statusEl);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    });
+  }
+}
+
+function finalizeBubble(msgDiv, fullText, sources, traceId) {
+  const bubble = msgDiv.querySelector('.bubble');
+  let html = formatContent(fullText);
+
+  if (sources && sources.length > 0) {
+    const grouped = {};
+    sources.forEach(s => {
+      const doc = s.doc_name || '';
+      if (!doc) return;
+      if (!grouped[doc]) grouped[doc] = [];
+      if (s.dieu) grouped[doc].push(s.dieu);
+    });
+    html += '<div class="sources"><div class="sources-label">Nguồn</div>';
+    Object.entries(grouped).forEach(([doc, dieus]) => {
+      let label = doc;
+      if (dieus.length > 0) label += ': ' + dieus.join(', ');
+      html += `<span class="source-tag">${esc(label)}</span>`;
+    });
+    html += '</div>';
+  }
+  if (traceId) {
+    html += `<div class="feedback" data-trace-id="${esc(traceId)}">
+      <button class="feedback-btn" onclick="sendFeedback(this, 1)" title="Hữu ích">&#x1F44D;</button>
+      <button class="feedback-btn" onclick="sendFeedback(this, 0)" title="Chưa tốt">&#x1F44E;</button>
+    </div>`;
+  }
+  bubble.innerHTML = html;
+  chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+function parseSSEBuffer(buffer) {
+  const events = [];
+  const lines = buffer.split('\n');
+  let currentEvent = null;
+  let currentData = '';
+
+  for (const line of lines) {
+    if (line.startsWith('event: ')) {
+      currentEvent = line.slice(7).trim();
+    } else if (line.startsWith('data: ')) {
+      currentData = line.slice(6);
+    } else if (line === '' && currentEvent) {
+      try {
+        events.push({ type: currentEvent, data: JSON.parse(currentData) });
+      } catch(e) {}
+      currentEvent = null;
+      currentData = '';
+    }
+  }
+  // Return remaining incomplete buffer
+  const lastDoubleNewline = buffer.lastIndexOf('\n\n');
+  const remaining = lastDoubleNewline >= 0 ? buffer.slice(lastDoubleNewline + 2) : buffer;
+  return { events, remaining };
+}
+
 async function handleSubmit(e) {
   e.preventDefault();
   const question = input.value.trim();
@@ -670,24 +838,27 @@ async function handleSubmit(e) {
   input.value = '';
   input.style.height = 'auto';
 
+  const isNewSession = !currentSessionId;
+
   addMessage('user', question);
-  addTyping();
+  const msgDiv = createStreamingBubble();
+  updateBubbleStatus(msgDiv, 'Đang xử lý...');
+
+  let streamSources = [];
+  let fullText = '';
+  let streamTraceId = null;
+  let statusCleared = false;
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 90000);
-    const res = await fetch('/chat', {
+    const timeout = setTimeout(() => controller.abort(), 120000);
+    const res = await fetch('/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        question,
-        session_id: currentSessionId
-      }),
+      body: JSON.stringify({ question, session_id: currentSessionId }),
       signal: controller.signal,
     });
     clearTimeout(timeout);
-
-    removeTyping();
 
     if (res.status === 429) {
       throw new Error('Bạn gửi quá nhiều yêu cầu. Vui lòng chờ 1 phút rồi thử lại.');
@@ -697,24 +868,54 @@ async function handleSubmit(e) {
       throw new Error(err.detail || 'Lỗi server');
     }
 
-    const data = await res.json();
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-    // Set session ID from server response
-    if (!currentSessionId && data.session_id) {
-      currentSessionId = data.session_id;
-      localStorage.setItem('datdai_session_id', currentSessionId);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = parseSSEBuffer(buffer);
+      buffer = parsed.remaining;
+
+      for (const evt of parsed.events) {
+        if (evt.type === 'status') {
+          updateBubbleStatus(msgDiv, evt.data.text);
+        } else if (evt.type === 'sources') {
+          streamSources = evt.data.sources || [];
+        } else if (evt.type === 'token') {
+          if (!statusCleared) {
+            clearBubbleStatus(msgDiv);
+            statusCleared = true;
+          }
+          fullText += evt.data.text;
+          updateBubbleContent(msgDiv, fullText);
+        } else if (evt.type === 'done') {
+          if (evt.data.session_id && !currentSessionId) {
+            currentSessionId = evt.data.session_id;
+            localStorage.setItem('datdai_session_id', currentSessionId);
+          }
+          streamTraceId = evt.data.trace_id;
+        } else if (evt.type === 'error') {
+          throw new Error(evt.data.detail || 'Lỗi xử lý câu hỏi');
+        }
+      }
     }
 
-    addMessage('assistant', data.answer, data.sources);
-
-    // Refresh sessions list (new title may have been generated)
-    setTimeout(loadSessions, 1000);
+    finalizeBubble(msgDiv, fullText, streamSources, streamTraceId);
+    if (isNewSession) setTimeout(loadSessions, 1500);
   } catch (err) {
-    removeTyping();
-    const msg = err.name === 'AbortError'
+    clearBubbleStatus(msgDiv);
+    const errorMsg = err.name === 'AbortError'
       ? 'Xin lỗi, yêu cầu đã hết thời gian chờ. Vui lòng thử lại.'
-      : `Xin lỗi, đã xảy ra lỗi: ${err.message}. Vui lòng thử lại.`;
-    addMessage('assistant', msg);
+      : `Xin lỗi, đã xảy ra lỗi: ${err.message}`;
+    if (fullText) {
+      fullText += '\n\n**Lỗi:** ' + errorMsg;
+      finalizeBubble(msgDiv, fullText, streamSources, null);
+    } else {
+      msgDiv.querySelector('.bubble').innerHTML = formatContent(errorMsg);
+    }
   }
 
   isLoading = false;

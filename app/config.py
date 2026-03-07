@@ -51,3 +51,7 @@ RAG_USE_RERANKER = True
 # Context management
 CONTEXT_MAX_TURN_GROUPS = 6
 CONTEXT_MAX_CHARS = 30_000
+
+# Orchestrator context budget (smaller -- only needs recent intent)
+ORCH_MAX_TURN_GROUPS = 3
+ORCH_MAX_CHARS = 8_000

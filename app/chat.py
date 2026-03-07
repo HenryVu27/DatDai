@@ -12,7 +12,7 @@ import time
 import uuid
 
 from app import db, llm
-from app.config import CONTEXT_MAX_TURN_GROUPS, CONTEXT_MAX_CHARS
+from app.config import CONTEXT_MAX_TURN_GROUPS, CONTEXT_MAX_CHARS, ORCH_MAX_TURN_GROUPS, ORCH_MAX_CHARS
 from app.rag.retriever import (
     search_legal_docs, lookup_amendment, lookup_specific_dieu,
     build_context, extract_sources,
@@ -111,9 +111,6 @@ Quy tac:
 </instructions>
 
 <examples>
-INPUT: "Xin chao"
-OUTPUT: {"reasoning": "Nguoi dung chao hoi, khong can tra cuu", "actions": [], "complexity": "simple", "summary_update": null, "direct_response": "Xin chao! Toi la chuyen gia tu van Luat Dat Dai. Ban can ho tro gi?"}
-
 INPUT: "Dieu 79 Luat Dat Dai 2024 quy dinh gi?"
 OUTPUT: {"reasoning": "Hoi noi dung cu the Dieu 79 LDD 2024, dung lookup_specific_dieu", "actions": [{"tool": "lookup_specific_dieu", "doc_id": "ldd2024", "dieu": "Dieu 79"}], "complexity": "simple", "summary_update": null, "direct_response": null}
 
@@ -122,9 +119,6 @@ OUTPUT: {"reasoning": "Cau hoi chung ve quyen su dung dat, can search", "actions
 
 INPUT: "ND 49 sua doi gi cua ND 102?"
 OUTPUT: {"reasoning": "Hoi ve sua doi giua 2 ND, can lookup_amendment va search", "actions": [{"tool": "lookup_amendment", "target_doc": "nd102", "source_doc": "nd49"}, {"tool": "search_legal_docs", "query": "Nghi dinh 49/2026 sua doi bo sung Nghi dinh 102/2024 chi tiet thi hanh Luat Dat Dai", "filters": {"doc_ids": ["nd49"]}}], "complexity": "complex", "summary_update": null, "direct_response": null}
-
-INPUT: "Cam on ban"
-OUTPUT: {"reasoning": "Cam on, xa giao", "actions": [], "complexity": "simple", "summary_update": null, "direct_response": "Khong co gi! Neu ban co them cau hoi ve Luat Dat Dai, hay hoi bat cu luc nao."}
 </examples>"""
 
 
@@ -185,6 +179,22 @@ async def _assemble_conversation_context(history: list[dict], session_id: str) -
         trimmed = trimmed[1:]
 
     return trimmed, summary_text
+
+
+def _trim_for_orchestrator(msgs: list[dict]) -> list[dict]:
+    """Re-trim messages to orchestrator's smaller budget."""
+    max_msgs = ORCH_MAX_TURN_GROUPS * 2
+    trimmed = msgs[-max_msgs:] if len(msgs) > max_msgs else list(msgs)
+    total = 0
+    result = []
+    for msg in reversed(trimmed):
+        total += len(msg["content"])
+        if total > ORCH_MAX_CHARS:
+            break
+        result.insert(0, msg)
+    if result and result[0]["role"] == "assistant":
+        result = result[1:]
+    return result
 
 
 def _build_orchestrator_prompt(
@@ -364,8 +374,10 @@ async def handle_message(session_id: str, user_message: str) -> dict:
 
     # -- Stage 1: Orchestrator --
     t_orch = time.monotonic()
+    orch_messages = _trim_for_orchestrator(recent_messages)
+    logger.info("orch_msgs=%d gen_msgs=%d", len(orch_messages), len(recent_messages))
     orch_system, orch_history, orch_prompt = _build_orchestrator_prompt(
-        user_message, recent_messages, summary,
+        user_message, orch_messages, summary,
     )
 
     orch_raw = await llm.generate(
@@ -402,9 +414,9 @@ async def handle_message(session_id: str, user_message: str) -> dict:
             "direct_response": None,
         }
 
-    # Save summary update if provided
+    # Save summary update if provided (background -- not needed for current response)
     if decision["summary_update"]:
-        await asyncio.to_thread(db.upsert_summary, session_id, decision["summary_update"], turn)
+        asyncio.create_task(asyncio.to_thread(db.upsert_summary, session_id, decision["summary_update"], turn))
 
     # -- Direct response path --
     if decision["direct_response"]:
@@ -471,6 +483,130 @@ async def handle_message(session_id: str, user_message: str) -> dict:
     logger.info("[%s] total turn time: %.1fs", session_id[:8], time.monotonic() - t_start)
 
     return {"answer": response, "sources": sources, "session_id": session_id}
+
+
+def _get_trace_id() -> str | None:
+    """Get current Langfuse trace ID, or None if tracing disabled."""
+    from app.observability import langfuse
+    if langfuse:
+        try:
+            return langfuse.get_current_trace_id()
+        except Exception:
+            pass
+    return None
+
+
+@observe(name="handle_message_stream")
+async def handle_message_stream(session_id: str, user_message: str):
+    """Async generator yielding (event_type, data_dict) tuples for SSE streaming."""
+    t_start = time.monotonic()
+
+    await asyncio.to_thread(db.create_session, session_id)
+    history = await asyncio.to_thread(db.get_messages, session_id)
+    turn = max((m["turn"] for m in history), default=0) + 1
+    recent_messages, summary = await _assemble_conversation_context(history, session_id)
+
+    # -- Stage 1: Orchestrator --
+    yield ("status", {"text": "Đang phân tích câu hỏi...", "step": "orchestrator"})
+
+    orch_messages = _trim_for_orchestrator(recent_messages)
+    orch_system, orch_history, orch_prompt = _build_orchestrator_prompt(
+        user_message, orch_messages, summary,
+    )
+    orch_raw = await llm.generate(
+        prompt=orch_prompt, system=orch_system, history=orch_history,
+        model="orchestrator", temperature=0.0, max_tokens=1000,
+    )
+    decision = _parse_orchestrator_response(orch_raw)
+    logger.info("[%s] turn=%d orchestrator: complexity=%s actions=%d direct=%s",
+                session_id[:8], turn, decision["complexity"],
+                len(decision["actions"]), bool(decision["direct_response"]))
+
+    # Guardrail
+    if _should_force_retrieval(user_message, decision):
+        filters = extract_filters(user_message)
+        decision = {
+            "reasoning": "Guardrail: legal question requires retrieval",
+            "actions": [{"tool": "search_legal_docs", "query": user_message, "filters": {
+                "doc_ids": filters.get("doc_ids"), "dieu": filters.get("dieu"),
+            }}],
+            "complexity": decision.get("complexity", "simple"),
+            "summary_update": decision.get("summary_update"),
+            "direct_response": None,
+        }
+
+    if decision["summary_update"]:
+        asyncio.create_task(asyncio.to_thread(db.upsert_summary, session_id, decision["summary_update"], turn))
+
+    # -- Direct response path --
+    if decision["direct_response"]:
+        response = decision["direct_response"]
+        await asyncio.to_thread(db.add_message, session_id, turn, "user", user_message)
+        await asyncio.to_thread(db.add_message, session_id, turn, "assistant", response, [])
+        if turn == 1:
+            asyncio.create_task(_generate_title(session_id, user_message, response))
+        # Yield the full direct response as tokens
+        yield ("token", {"text": response})
+        yield ("done", {"session_id": session_id, "trace_id": _get_trace_id()})
+        return
+
+    # -- Stage 2: Execute tools --
+    yield ("status", {"text": "Đang tìm kiếm văn bản pháp luật...", "step": "retrieval"})
+    chunks = await _execute_tools(decision["actions"])
+    logger.info("[%s] tools returned %d chunks", session_id[:8], len(chunks))
+
+    context = build_context(chunks)
+    sources = extract_sources(chunks)
+    yield ("sources", {"sources": sources})
+
+    # -- Stage 3: Reranking status --
+    yield ("status", {"text": "Đang xếp hạng kết quả...", "step": "reranking"})
+
+    # -- Stage 4: Generator (streaming) --
+    yield ("status", {"text": "Đang tạo câu trả lời...", "step": "generating"})
+
+    model = "pro" if decision["complexity"] == "complex" else "flash"
+    gen_system, gen_history, gen_prompt = _build_generator_prompt(
+        user_message, context, recent_messages, summary,
+    )
+
+    full_response_parts = []
+    async for chunk_text in llm.generate_stream(
+        prompt=gen_prompt, system=gen_system, history=gen_history,
+        model=model, temperature=0.3, max_tokens=6000,
+    ):
+        full_response_parts.append(chunk_text)
+        yield ("token", {"text": chunk_text})
+
+    response = "".join(full_response_parts)
+
+    # Citation verification
+    response, cite_meta = verify_citations(response, chunks)
+    if cite_meta.get("unverified"):
+        logger.warning("[%s] Unverified citations: %s", session_id[:8], cite_meta["unverified"])
+
+    # Save messages
+    await asyncio.to_thread(db.add_messages_batch, session_id, [
+        (turn, "user", user_message, None),
+        (turn, "assistant", response, sources),
+    ])
+
+    if turn == 1:
+        asyncio.create_task(_generate_title(session_id, user_message, response))
+
+    # Langfuse scores
+    score_current_trace("retrieval_count", float(len(chunks)))
+    score_current_trace("response_length", float(len(response)))
+    score_current_trace("has_sources", 1.0 if sources else 0.0)
+    score_current_trace("model_used", 1.0 if model == "pro" else 0.0, comment=model)
+    reranked = [c for c in chunks if c.get("score", 0) > 0]
+    if reranked:
+        scores = [c["score"] for c in reranked]
+        score_current_trace("reranker_top_score", max(scores))
+        score_current_trace("reranker_mean_score", sum(scores) / len(scores))
+
+    logger.info("[%s] stream total: %.1fs", session_id[:8], time.monotonic() - t_start)
+    yield ("done", {"session_id": session_id, "trace_id": _get_trace_id()})
 
 
 @observe(name="generate_title")

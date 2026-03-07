@@ -15,6 +15,7 @@ _use_pg = bool(SUPABASE_DB_URL)
 if _use_pg:
     import psycopg2
     import psycopg2.extras
+    import psycopg2.pool
 
 # --- Schema ---
 
@@ -79,11 +80,16 @@ CREATE INDEX IF NOT EXISTS idx_summaries_session ON summaries(session_id);
 """
 
 _pg_schema_initialized = False
+_pg_pool = None
 
 
 def _get_pg():
-    global _pg_schema_initialized
-    conn = psycopg2.connect(SUPABASE_DB_URL)
+    global _pg_schema_initialized, _pg_pool
+    if _pg_pool is None:
+        _pg_pool = psycopg2.pool.ThreadedConnectionPool(
+            minconn=1, maxconn=5, dsn=SUPABASE_DB_URL
+        )
+    conn = _pg_pool.getconn()
     if not _pg_schema_initialized:
         with conn.cursor() as cur:
             cur.execute(_PG_SCHEMA)
@@ -102,6 +108,13 @@ def _get_sqlite():
 
 def _get_db():
     return _get_pg() if _use_pg else _get_sqlite()
+
+
+def _release_db(conn):
+    if _use_pg and _pg_pool is not None:
+        _pg_pool.putconn(conn)
+    else:
+        conn.close()
 
 
 def _ph(name=""):
@@ -145,7 +158,7 @@ def create_session(session_id: str, title: str = "") -> None:
             (session_id, datetime.now().isoformat(), title),
         )
         db.commit()
-    db.close()
+    _release_db(db)
 
 
 def add_message(session_id: str, turn: int, role: str, content: str, sources: list | None = None) -> None:
@@ -160,7 +173,28 @@ def add_message(session_id: str, turn: int, role: str, content: str, sources: li
     else:
         db.execute(sql, args)
         db.commit()
-    db.close()
+    _release_db(db)
+
+
+def add_messages_batch(session_id: str, messages: list[tuple[int, str, str, list | None]]) -> None:
+    """Insert multiple messages in a single connection + transaction.
+
+    Each message is a tuple of (turn, role, content, sources).
+    """
+    db = _get_db()
+    p = _ph()
+    sql = f"INSERT INTO messages (session_id, turn, role, content, sources, created_at) VALUES ({p}, {p}, {p}, {p}, {p}, {p})"
+    now = datetime.now().isoformat()
+    if _use_pg:
+        with db.cursor() as cur:
+            for turn, role, content, sources in messages:
+                cur.execute(sql, (session_id, turn, role, content, json.dumps(sources or []), now))
+        db.commit()
+    else:
+        for turn, role, content, sources in messages:
+            db.execute(sql, (session_id, turn, role, content, json.dumps(sources or []), now))
+        db.commit()
+    _release_db(db)
 
 
 def get_messages(session_id: str, limit: int = 100) -> list[dict]:
@@ -174,7 +208,7 @@ def get_messages(session_id: str, limit: int = 100) -> list[dict]:
     else:
         rows = db.execute(sql, (session_id, limit)).fetchall()
         result = [dict(r) for r in rows]
-    db.close()
+    _release_db(db)
     return result
 
 
@@ -186,11 +220,11 @@ def get_turn_count(session_id: str) -> int:
         with db.cursor() as cur:
             cur.execute(sql, (session_id,))
             row = cur.fetchone()
-        db.close()
+        _release_db(db)
         return row[0] if row else 0
     else:
         row = db.execute(sql, (session_id,)).fetchone()
-        db.close()
+        _release_db(db)
         return row["max_turn"] if row else 0
 
 
@@ -206,7 +240,7 @@ def save_summary(session_id: str, summary: str, covers_through_turn: int) -> Non
     else:
         db.execute(sql, args)
         db.commit()
-    db.close()
+    _release_db(db)
 
 
 def get_latest_summary(session_id: str) -> dict | None:
@@ -220,7 +254,7 @@ def get_latest_summary(session_id: str) -> dict | None:
     else:
         row = db.execute(sql, (session_id,)).fetchone()
         result = dict(row) if row else None
-    db.close()
+    _release_db(db)
     return result
 
 
@@ -262,7 +296,7 @@ def upsert_summary(session_id: str, summary: str, covers_through_turn: int) -> N
                 (session_id, summary, covers_through_turn, now),
             )
         db.commit()
-    db.close()
+    _release_db(db)
 
 
 def get_sessions() -> list[dict]:
@@ -278,7 +312,7 @@ def get_sessions() -> list[dict]:
     else:
         rows = db.execute(sql).fetchall()
         result = [dict(r) for r in rows]
-    db.close()
+    _release_db(db)
     return result
 
 
@@ -293,4 +327,4 @@ def update_session_title(session_id: str, title: str) -> None:
     else:
         db.execute(sql, (title, session_id))
         db.commit()
-    db.close()
+    _release_db(db)

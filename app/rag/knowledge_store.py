@@ -62,16 +62,10 @@ class KnowledgeStore:
         Returns list of payload dicts with 'score' key added.
         """
         client = self._get_client()
-        try:
-            info = client.get_collection(QDRANT_COLLECTION)
-            if info.points_count == 0:
-                return []
-        except Exception:
-            return []
 
         qdrant_filter = self._build_filter(doc_ids=doc_ids, dieu=dieu)
         sparse_vec = self._text_to_sparse(query_text)
-        prefetch_limit = min(top_k * 3, info.points_count)
+        prefetch_limit = top_k * 3
 
         prefetches = [
             Prefetch(query=query_vector, using="dense", limit=prefetch_limit),
@@ -95,12 +89,6 @@ class KnowledgeStore:
     def fetch_by_metadata(self, doc_id: str = None, dieu: str = None, limit: int = 5) -> list[dict]:
         """Fetch chunks by exact metadata match (no embedding needed)."""
         client = self._get_client()
-        try:
-            info = client.get_collection(QDRANT_COLLECTION)
-            if info.points_count == 0:
-                return []
-        except Exception:
-            return []
 
         conditions = []
         if doc_id:
@@ -126,12 +114,6 @@ class KnowledgeStore:
         A single Dieu may be split into multiple chunks (by Khoan).
         """
         client = self._get_client()
-        try:
-            info = client.get_collection(QDRANT_COLLECTION)
-            if info.points_count == 0:
-                return []
-        except Exception:
-            return []
 
         conditions = [
             FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
@@ -152,12 +134,6 @@ class KnowledgeStore:
         if not chunk_ids:
             return []
         client = self._get_client()
-        try:
-            info = client.get_collection(QDRANT_COLLECTION)
-            if info.points_count == 0:
-                return []
-        except Exception:
-            return []
 
         results = client.scroll(
             collection_name=QDRANT_COLLECTION,

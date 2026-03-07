@@ -88,6 +88,76 @@ async def generate(
     return ""
 
 
+async def generate_stream(
+    prompt: str,
+    system: str = "",
+    history: list[dict] | None = None,
+    model: str = "flash",
+    temperature: float = 0.3,
+    max_tokens: int = 6000,
+):
+    """Async generator that yields text chunks from Gemini streaming API.
+
+    Falls back to fallback model if primary fails before yielding any token.
+    """
+    client = get_client()
+    primary, fallback = MODEL_MAP.get(model, (GENERATOR_FLASH_MODEL, FALLBACK_FLASH_MODEL))
+
+    contents = []
+    if history:
+        for msg in history:
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])]))
+    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=prompt)]))
+
+    config = types.GenerateContentConfig(
+        system_instruction=system if system else None,
+        temperature=temperature,
+        max_output_tokens=max_tokens,
+    )
+
+    for model_id in (primary, fallback):
+        try:
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+            exc_holder: list[Exception] = []
+
+            def _run_stream():
+                try:
+                    for chunk in client.models.generate_content_stream(
+                        model=model_id, contents=contents, config=config,
+                    ):
+                        if chunk.text:
+                            queue.put_nowait(chunk.text)
+                except Exception as e:
+                    exc_holder.append(e)
+                finally:
+                    queue.put_nowait(None)  # sentinel
+
+            loop = asyncio.get_event_loop()
+            fut = loop.run_in_executor(None, _run_stream)
+
+            yielded_any = False
+            while True:
+                item = await asyncio.wait_for(queue.get(), timeout=60)
+                if item is None:
+                    break
+                yielded_any = True
+                yield item
+
+            await fut  # ensure thread finished
+            if exc_holder:
+                if not yielded_any:
+                    raise exc_holder[0]
+                else:
+                    logger.error("Stream error after yielding tokens: %s", exc_holder[0])
+            return  # success
+        except Exception as e:
+            if model_id == primary:
+                logger.warning("Primary stream %s failed, trying fallback %s: %s", primary, fallback, e)
+                continue
+            raise
+
+
 @observe(name="embed")
 async def embed(texts: list[str]) -> list[list[float]]:
     """Create embeddings using Gemini embedding model."""
