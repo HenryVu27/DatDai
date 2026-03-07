@@ -660,6 +660,9 @@ async function switchSession(id, title) {
       if (m.role === 'user') lastUserQuestion = m.content;
       addMessage(m.role, m.content, sources);
     });
+    // Only show regenerate on the last assistant message
+    const regenBtns = chatArea.querySelectorAll('.feedback-btn.regenerate');
+    regenBtns.forEach((btn, i) => { if (i < regenBtns.length - 1) btn.remove(); });
   } catch(e) {
     addMessage('assistant', 'Không thể tải tin nhắn. Vui lòng thử lại.');
   }
@@ -748,10 +751,13 @@ function addMessage(role, content, sources, traceId) {
     });
     html += `</div>`;
   }
-  if (role === 'assistant' && traceId) {
-    html += `<div class="feedback" data-trace-id="${esc(traceId)}">`;
-    html += `<button class="feedback-btn" onclick="sendFeedback(this, 1)" title="Hữu ích" aria-label="Phản hồi hữu ích">&#x1F44D;</button>`;
-    html += `<button class="feedback-btn" onclick="sendFeedback(this, 0)" title="Chưa tốt" aria-label="Phản hồi chưa tốt">&#x1F44E;</button>`;
+  if (role === 'assistant') {
+    html += `<div class="feedback"${traceId ? ` data-trace-id="${esc(traceId)}"` : ''}>`;
+    if (traceId) {
+      html += `<button class="feedback-btn" onclick="sendFeedback(this, 1)" title="Hữu ích" aria-label="Phản hồi hữu ích">&#x1F44D;</button>`;
+      html += `<button class="feedback-btn" onclick="sendFeedback(this, 0)" title="Chưa tốt" aria-label="Phản hồi chưa tốt">&#x1F44E;</button>`;
+    }
+    html += `<button class="feedback-btn regenerate" onclick="regenerateResponse()" title="Tạo lại câu trả lời" aria-label="Tạo lại câu trả lời">&#x21BB;</button>`;
     html += `</div>`;
   }
   html += `</div>`;
