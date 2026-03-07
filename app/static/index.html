@@ -870,6 +870,7 @@ function clearBubbleStatus(msgDiv) {
 let _rafPending = false;
 let _rafFullText = '';
 let _rafMsgDiv = null;
+let _rafCancelled = false;
 
 function updateBubbleContent(msgDiv, fullText) {
   _rafFullText = fullText;
@@ -878,6 +879,7 @@ function updateBubbleContent(msgDiv, fullText) {
     _rafPending = true;
     requestAnimationFrame(() => {
       _rafPending = false;
+      if (_rafCancelled) { _rafCancelled = false; return; }
       const bubble = _rafMsgDiv.querySelector('.bubble');
       // Preserve status-text if still present
       const statusEl = bubble.querySelector('.status-text');
@@ -889,6 +891,10 @@ function updateBubbleContent(msgDiv, fullText) {
 }
 
 function finalizeBubble(msgDiv, fullText, sources, traceId) {
+  // Cancel any pending rAF from updateBubbleContent to prevent it
+  // from overwriting the finalized content with sources + feedback
+  _rafCancelled = true;
+
   const bubble = msgDiv.querySelector('.bubble');
   let html = formatContent(fullText);
 
