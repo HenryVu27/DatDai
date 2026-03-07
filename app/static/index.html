@@ -336,7 +336,6 @@ body { display: flex; }
 }
 #send-btn:hover { opacity: 0.88; }
 #send-btn:active { transform: scale(0.95); }
-#send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 #send-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ========== Welcome ========== */
@@ -516,6 +515,7 @@ const topbarTitle = document.getElementById('topbar-title');
 let currentSessionId = null;
 let isLoading = false;
 let currentController = null;
+let userAborted = false;
 
 const SEND_ICON = '<svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
 const STOP_ICON = '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>';
@@ -672,6 +672,7 @@ input.addEventListener('keydown', (e) => {
 sendBtn.addEventListener('click', (e) => {
   if (isLoading && currentController) {
     e.preventDefault();
+    userAborted = true;
     currentController.abort();
   }
 });
@@ -956,19 +957,29 @@ async function handleSubmit(e) {
     if (isNewSession) setTimeout(loadSessions, 1500);
   } catch (err) {
     clearBubbleStatus(msgDiv);
-    const errorMsg = err.name === 'AbortError'
-      ? 'Xin lỗi, yêu cầu đã hết thời gian chờ. Vui lòng thử lại.'
-      : `Xin lỗi, đã xảy ra lỗi: ${err.message}`;
-    if (fullText) {
-      fullText += '\n\n**Lỗi:** ' + errorMsg;
-      finalizeBubble(msgDiv, fullText, streamSources, null);
+    if (err.name === 'AbortError' && userAborted) {
+      // User clicked stop -- finalize with whatever partial text we have
+      if (fullText) {
+        finalizeBubble(msgDiv, fullText, streamSources, null);
+      } else {
+        msgDiv.querySelector('.bubble').innerHTML = '<p style="color:var(--text-muted)">Đã dừng tạo câu trả lời.</p>';
+      }
     } else {
-      msgDiv.querySelector('.bubble').innerHTML = formatContent(errorMsg);
+      const errorMsg = err.name === 'AbortError'
+        ? 'Xin lỗi, yêu cầu đã hết thời gian chờ. Vui lòng thử lại.'
+        : `Xin lỗi, đã xảy ra lỗi: ${err.message}`;
+      if (fullText) {
+        fullText += '\n\n**Lỗi:** ' + errorMsg;
+        finalizeBubble(msgDiv, fullText, streamSources, null);
+      } else {
+        msgDiv.querySelector('.bubble').innerHTML = formatContent(errorMsg);
+      }
     }
   }
 
   isLoading = false;
   currentController = null;
+  userAborted = false;
   setSendButtonState(false);
   input.focus();
 }
