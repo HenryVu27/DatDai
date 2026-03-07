@@ -687,9 +687,9 @@ function formatContent(text) {
   // Bold
   h = h.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   // Headers (h1-h6)
-  h = h.replace(/^#{1,6} (.+)$/gm, (match, text) => {
-    const level = match.indexOf(' ');
-    const tag = level > 6 ? 'h6' : 'h' + level;
+  h = h.replace(/^(#{1,6}) (.+)$/gm, (match, hashes, text) => {
+    const level = hashes.length;
+    const tag = 'h' + level;
     return `<${tag}>${text}</${tag}>`;
   });
   // Lists

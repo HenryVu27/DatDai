@@ -16,7 +16,7 @@ import json
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -86,7 +86,7 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
 
 class ChatRequest(BaseModel):
-    question: str
+    question: str = Field(..., max_length=5000)
     session_id: str | None = None
 
 

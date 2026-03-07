@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class CrossEncoderReranker:
-    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3"):
+    def __init__(self, model_name: str = "BAAI/bge-reranker-base"):
         from fastembed.rerank.cross_encoder import TextCrossEncoder
         self._model = TextCrossEncoder(model_name=model_name)
         logger.info("CrossEncoderReranker loaded (model=%s)", model_name)

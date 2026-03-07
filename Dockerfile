@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the reranker model so it's cached in the image
 # (avoids HuggingFace rate-limits and 40s+ retry loops at runtime)
-RUN python -c "from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder(model_name='BAAI/bge-reranker-v2-m3')"
+RUN python -c "from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder(model_name='BAAI/bge-reranker-base')"
 
 COPY app/ app/
 
