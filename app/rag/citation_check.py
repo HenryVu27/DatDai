@@ -24,7 +24,7 @@ _DIEM_KHOAN_DIEU_RE = re.compile(
 )
 
 _DISCLAIMER = (
-    "\n\n⚠️ *Lưu ý: Một số trích dẫn trong câu trả lời "
+    "\n\n*Lưu ý: Một số trích dẫn trong câu trả lời "
     "chưa được xác minh từ văn bản gốc. "
     "Vui lòng kiểm tra lại các điều khoản cụ thể.*"
 )
