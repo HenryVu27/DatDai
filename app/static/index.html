@@ -137,6 +137,39 @@ body { display: flex; }
   color: var(--accent);
   font-weight: 500;
 }
+.session-item-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.session-item-wrapper .session-item {
+  padding-right: 2rem; /* prevent text from sliding under delete button */
+}
+.session-delete-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.session-item-wrapper:hover .session-delete-btn,
+.session-item-wrapper:focus-within .session-delete-btn {
+  opacity: 1;
+}
+.session-delete-btn:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
 
 .sidebar-footer {
   padding: 0.75rem 1rem;
@@ -663,14 +696,30 @@ async function loadSessions() {
     const sessions = await res.json();
     sessionsList.innerHTML = '';
     sessions.forEach(s => {
-      const div = document.createElement('button');
-      div.type = 'button';
-      div.setAttribute('role', 'listitem');
-      div.className = 'session-item' + (s.id === currentSessionId ? ' active' : '');
-      div.dataset.id = s.id;
-      div.textContent = s.title || s.first_message || 'Cuộc hội thoại mới';
-      div.onclick = () => switchSession(s.id, s.title || s.first_message || 'Cuộc hội thoại mới');
-      sessionsList.appendChild(div);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'session-item-wrapper';
+      wrapper.setAttribute('role', 'listitem');
+
+      const sessionTitle = s.title || s.first_message || 'Cuộc hội thoại mới';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'session-item' + (s.id === currentSessionId ? ' active' : '');
+      btn.dataset.id = s.id;
+      btn.textContent = sessionTitle;
+      btn.onclick = () => switchSession(s.id, sessionTitle);
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'session-delete-btn';
+      delBtn.title = 'Xoa cuoc hoi thoai';
+      delBtn.setAttribute('aria-label', 'Xoa cuoc hoi thoai');
+      delBtn.innerHTML = '&#x2715;';
+      delBtn.onclick = (e) => { e.stopPropagation(); deleteSession(s.id); };
+
+      wrapper.appendChild(btn);
+      wrapper.appendChild(delBtn);
+      sessionsList.appendChild(wrapper);
     });
   } catch(e) {
     sessionsList.innerHTML = '<div style="padding:0.75rem;font-size:0.82rem;color:var(--text-muted)">Không thể tải danh sách hội thoại.</div>';
@@ -740,6 +789,19 @@ async function newChat() {
 
   loadSessions();
   input.focus();
+}
+
+async function deleteSession(id) {
+  try {
+    await fetch(`/sessions/${id}`, { method: 'DELETE' });
+  } catch(e) {
+    // Silently ignore -- UI will still update
+  }
+  if (id === currentSessionId) {
+    newChat(); // switches to new chat and reloads session list
+  } else {
+    loadSessions();
+  }
 }
 
 // ===== Chat =====
