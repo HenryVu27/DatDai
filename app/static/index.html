@@ -515,6 +515,17 @@ const topbarTitle = document.getElementById('topbar-title');
 
 let currentSessionId = null;
 let isLoading = false;
+let currentController = null;
+
+const SEND_ICON = '<svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+const STOP_ICON = '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>';
+
+function setSendButtonState(loading) {
+  sendBtn.innerHTML = loading ? STOP_ICON : SEND_ICON;
+  sendBtn.title = loading ? 'Dừng tạo câu trả lời' : 'Gửi câu hỏi';
+  sendBtn.setAttribute('aria-label', loading ? 'Dừng tạo câu trả lời' : 'Gửi câu hỏi');
+  sendBtn.type = loading ? 'button' : 'submit';
+}
 
 // ===== Suggestion Pool =====
 const SUGGESTION_POOL = [
@@ -655,6 +666,13 @@ input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     document.getElementById('input-form').dispatchEvent(new Event('submit'));
+  }
+});
+
+sendBtn.addEventListener('click', (e) => {
+  if (isLoading && currentController) {
+    e.preventDefault();
+    currentController.abort();
   }
 });
 
@@ -865,7 +883,7 @@ async function handleSubmit(e) {
   if (!question || isLoading) return;
 
   isLoading = true;
-  sendBtn.disabled = true;
+  setSendButtonState(true);
   input.value = '';
   input.style.height = 'auto';
 
@@ -881,13 +899,13 @@ async function handleSubmit(e) {
   let statusCleared = false;
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120000);
+    currentController = new AbortController();
+    const timeout = setTimeout(() => currentController.abort(), 120000);
     const res = await fetch('/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question, session_id: currentSessionId }),
-      signal: controller.signal,
+      signal: currentController.signal,
     });
     clearTimeout(timeout);
 
@@ -950,7 +968,8 @@ async function handleSubmit(e) {
   }
 
   isLoading = false;
-  sendBtn.disabled = false;
+  currentController = null;
+  setSendButtonState(false);
   input.focus();
 }
 
