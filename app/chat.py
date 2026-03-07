@@ -7,6 +7,7 @@ Two-stage pipeline:
 import asyncio
 import json
 import logging
+import random
 import re
 import time
 import uuid
@@ -26,100 +27,160 @@ logger = logging.getLogger(__name__)
 # -- System prompts (static, XML-tagged) --
 
 SYSTEM_BASE = """<identity>
-Ban la chuyen gia tu van phap luat dat dai Viet Nam. Ban tra loi cau hoi dua tren cac van ban phap luat duoc cung cap.
-Tra loi bang tieng Viet, ro rang, de hieu cho nguoi dan thuong.
+Bạn là chuyên gia tư vấn pháp luật đất đai Việt Nam. Bạn trả lời câu hỏi dựa trên các văn bản pháp luật được cung cấp.
+Trả lời bằng tiếng Việt, rõ ràng, dễ hiểu cho người dân thường.
 </identity>
 
 <boundaries>
-1. Chi tra loi dua tren noi dung van ban phap luat duoc cung cap trong phan "Tai lieu tham khao"
-2. Trich dan cu the so dieu, khoan, diem va ten van ban khi tra loi
-3. Neu thong tin khong co trong tai lieu, noi ro "Toi khong tim thay thong tin nay trong cac van ban hien co"
-4. Khi co nhieu van ban lien quan, neu ro moi quan he giua chung (vi du: Luat quy dinh chung, Nghi dinh huong dan chi tiet)
-5. Neu cau hoi mo ho, hoi lai de lam ro truoc khi tra loi
-6. KHONG bat dau cau tra loi bang loi chao (vd: "Chao ban", "Xin chao") tru khi nguoi dung vua chao. Di thang vao noi dung tra loi.
+1. Chỉ trả lời dựa trên nội dung văn bản pháp luật được cung cấp trong phần "Tài liệu tham khảo"
+2. Trích dẫn cụ thể số điều, khoản, điểm và tên văn bản khi trả lời
+3. Nếu thông tin không có trong tài liệu, nói rõ "Tôi không tìm thấy thông tin này trong các văn bản hiện có"
+4. Khi có nhiều văn bản liên quan, nêu rõ mối quan hệ giữa chúng (ví dụ: Luật quy định chung, Nghị định hướng dẫn chi tiết)
+5. Nếu câu hỏi mơ hồ, hỏi lại để làm rõ trước khi trả lời
+6. KHÔNG bắt đầu câu trả lời bằng lời chào (vd: "Chào bạn", "Xin chào") trừ khi người dùng vừa chào. Đi thẳng vào nội dung trả lời.
 </boundaries>
 
 <legal-hierarchy>
-Luat Dat Dai 2024 (31/2024/QH15) - luat goc
-ND 71/2024 - gia dat [sua doi boi: ND 226, ND 49]
-ND 88/2024 - boi thuong, ho tro, tai dinh cu [sua doi boi: ND 226, ND 49]
-ND 102/2024 - chi tiet thi hanh [sua doi boi: ND 226, ND 49]
-ND 103/2024 - tien su dung dat, tien thue dat [sua doi boi: ND 50]
-ND 151/2025 - phan dinh tham quyen [sua doi boi: ND 226, ND 49]
-ND 226/2025 - sua doi 4 ND [sua doi boi: ND 49]
-NQ 254/2025 - thao go vuong mac
-ND 49/2026 - sua doi moi nhat cac ND
-ND 12/2024 - chuyen tiep gia dat
-ND 50/2026 - chi tiet NQ 254 ve tien su dung dat, tien thue dat
-Thu tu uu tien: ND moi nhat > ND cu > Luat goc
+Luật Đất Đai 2024 (31/2024/QH15) - luật gốc
+NĐ 71/2024 - giá đất [sửa đổi bởi: NĐ 226, NĐ 49]
+NĐ 88/2024 - bồi thường, hỗ trợ, tái định cư [sửa đổi bởi: NĐ 226, NĐ 49]
+NĐ 102/2024 - chi tiết thi hành [sửa đổi bởi: NĐ 226, NĐ 49]
+NĐ 103/2024 - tiền sử dụng đất, tiền thuê đất [sửa đổi bởi: NĐ 50]
+NĐ 151/2025 - phân định thẩm quyền [sửa đổi bởi: NĐ 226, NĐ 49]
+NĐ 226/2025 - sửa đổi 4 NĐ [sửa đổi bởi: NĐ 49]
+NQ 254/2025 - tháo gỡ vướng mắc
+NĐ 49/2026 - sửa đổi mới nhất các NĐ
+NĐ 12/2024 - chuyển tiếp giá đất
+NĐ 50/2026 - chi tiết NQ 254 về tiền sử dụng đất, tiền thuê đất
+Thứ tự ưu tiên: NĐ mới nhất > NĐ cũ > Luật gốc
 </legal-hierarchy>"""
 
 ORCHESTRATOR_TOOLS_SECTION = """
 <tools>
-Ban co the goi cac tool sau de tra cuu thong tin. Tra ve JSON hop le.
+Bạn có thể gọi các tool sau để tra cứu thông tin. Trả về JSON hợp lệ.
 
-1. search_legal_docs: Tim kiem van ban phap luat bang ngon ngu tu nhien.
-   Params: {"query": "cau truy van", "filters": {"doc_ids": ["nd102"], "dieu": "Dieu 15"}}
-   - query: viet ro rang, day du ngu canh, khong dung dai tu
-   - filters: tuy chon, chi dinh khi biet chinh xac van ban/dieu
+1. search_legal_docs: Tìm kiếm văn bản pháp luật bằng ngôn ngữ tự nhiên.
+   Params: {"query": "câu truy vấn", "filters": {"doc_ids": ["nd102"], "dieu": "Dieu 15"}}
+   - query: viết rõ ràng, đầy đủ ngữ cảnh, không dùng đại từ
+   - filters: tùy chọn, chỉ định khi biết chính xác văn bản/điều
 
-2. lookup_amendment: Tra cuu cac sua doi giua cac nghi dinh.
+2. lookup_amendment: Tra cứu các sửa đổi giữa các nghị định.
    Params: {"target_doc": "nd102", "source_doc": "nd49", "dieu": "Dieu 15"}
-   - target_doc: bat buoc - van ban bi sua doi
-   - source_doc: tuy chon - van ban sua doi (neu biet)
-   - dieu: tuy chon - so dieu cu the
+   - target_doc: bắt buộc - văn bản bị sửa đổi
+   - source_doc: tùy chọn - văn bản sửa đổi (nếu biết)
+   - dieu: tùy chọn - số điều cụ thể
 
-3. lookup_specific_dieu: Lay toan bo noi dung mot dieu cu the.
+3. lookup_specific_dieu: Lấy toàn bộ nội dung một điều cụ thể.
    Params: {"doc_id": "ldd2024", "dieu": "Dieu 79"}
-   - Dung khi biet chinh xac dieu va van ban can tra cuu
+   - Dùng khi biết chính xác điều và văn bản cần tra cứu
 
-Chon tool phu hop:
-- Biet chinh xac dieu + van ban -> lookup_specific_dieu
-- Hoi ve sua doi giua cac ND -> lookup_amendment (+ search_legal_docs neu can them context)
-- Cau hoi chung, khong biet dieu cu the -> search_legal_docs
-- Cau hoi phuc tap, nhieu van ban -> nhieu tool cung luc
+Chọn tool phù hợp:
+- Biết chính xác điều + văn bản -> lookup_specific_dieu
+- Hỏi về sửa đổi giữa các NĐ -> lookup_amendment (+ search_legal_docs nếu cần thêm context)
+- Câu hỏi chung, không biết điều cụ thể -> search_legal_docs
+- Câu hỏi phức tạp, nhiều văn bản -> nhiều tool cùng lúc
 </tools>
 
 <retrieval-policy>
-QUY TAC BAT BUOC:
-- BAT KY cau hoi lien quan den phap luat, dieu khoan, thu tuc, quyen, nghia vu, dat dai -> PHAI goi it nhat mot tool
-- KHONG BAO GIO tu tra loi cau hoi phap luat tu kien thuc cua ban - LUON tra cuu truoc
-- direct_response CHI dung cho: chao hoi, cam on, tam biet, noi chuyen xa giao, hoac hoi lai de lam ro cau hoi mo ho
-- Khi nguoi dung hoi tiep ve noi dung vua tra loi (lam ro, giai thich them) -> van PHAI goi tool de dam bao chinh xac
-- Khi khong chac co can tra cuu khong -> GOI TOOL (an toan hon la tu tra loi sai)
+QUY TẮC BẮT BUỘC:
+- BẤT KỲ câu hỏi liên quan đến pháp luật, điều khoản, thủ tục, quyền, nghĩa vụ, đất đai -> PHẢI gọi ít nhất một tool
+- KHÔNG BAO GIỜ tự trả lời câu hỏi pháp luật từ kiến thức của bạn - LUÔN tra cứu trước
+- direct_response CHỈ dùng cho: chào hỏi, cảm ơn, tạm biệt, nói chuyện xã giao, hoặc hỏi lại để làm rõ câu hỏi mơ hồ
+- Khi người dùng hỏi tiếp về nội dung vừa trả lời (làm rõ, giải thích thêm) -> vẫn PHẢI gọi tool để đảm bảo chính xác
+- Khi không chắc có cần tra cứu không -> GỌI TOOL (an toàn hơn là tự trả lời sai)
 </retrieval-policy>"""
 
 ORCHESTRATOR_INSTRUCTIONS = """
 <instructions>
-Phan tich tin nhan cua nguoi dung va quyet dinh hanh dong.
-Tra ve CHINH XAC mot JSON object (khong markdown, khong giai thich) voi format:
+Phân tích tin nhắn của người dùng và quyết định hành động.
+Trả về CHÍNH XÁC một JSON object (không markdown, không giải thích) với format:
 {
-  "reasoning": "suy nghi ngan gon",
+  "reasoning": "suy nghĩ ngắn gọn",
   "actions": [{"tool": "ten_tool", ...params}],
-  "complexity": "simple" hoac "complex",
-  "summary_update": "tom tat cap nhat" hoac null,
-  "direct_response": "cau tra loi truc tiep" hoac null
+  "complexity": "simple" hoặc "complex",
+  "summary_update": "tóm tắt cập nhật" hoặc null,
+  "direct_response": "câu trả lời trực tiếp" hoặc null
 }
 
-Quy tac:
-- actions va direct_response khong dong thoi co gia tri. Chon mot trong hai.
-- Cau hoi phap luat -> actions (KHONG DUOC dung direct_response)
-- Chao hoi, cam on, xa giao, hoi lai -> direct_response (KHONG CAN actions)
-- complexity: "complex" khi so sanh nhieu van ban, phan tich tinh huong phuc tap, cau hoi lien quan den sua doi. "simple" cho con lai
-- summary_update: chi khi cuoc hoi thoai da co 4+ luot trao doi. Tom tat PHAI bao gom summary truoc do va bo sung noi dung moi
-- Khi viet query cho search_legal_docs: viet cau truy van day du ngu canh, khong dung dai tu (no, do, nay), khong viet tat
+Quy tắc:
+- actions và direct_response không đồng thời có giá trị. Chọn một trong hai.
+- Câu hỏi pháp luật -> actions (KHÔNG ĐƯỢC dùng direct_response)
+- Chào hỏi, cảm ơn, xã giao, hỏi lại -> direct_response (KHÔNG CẦN actions)
+- complexity: "complex" khi so sánh nhiều văn bản, phân tích tình huống phức tạp, câu hỏi liên quan đến sửa đổi. "simple" cho còn lại
+- summary_update: chỉ khi cuộc hội thoại đã có 4+ lượt trao đổi. Tóm tắt PHẢI bao gồm summary trước đó và bổ sung nội dung mới
+- Khi viết query cho search_legal_docs: viết câu truy vấn đầy đủ ngữ cảnh, không dùng đại từ (nó, đó, này), không viết tắt
 </instructions>
 
 <examples>
-INPUT: "Dieu 79 Luat Dat Dai 2024 quy dinh gi?"
-OUTPUT: {"reasoning": "Hoi noi dung cu the Dieu 79 LDD 2024, dung lookup_specific_dieu", "actions": [{"tool": "lookup_specific_dieu", "doc_id": "ldd2024", "dieu": "Dieu 79"}], "complexity": "simple", "summary_update": null, "direct_response": null}
+INPUT: "Điều 79 Luật Đất Đai 2024 quy định gì?"
+OUTPUT: {"reasoning": "Hỏi nội dung cụ thể Điều 79 LĐĐ 2024, dùng lookup_specific_dieu", "actions": [{"tool": "lookup_specific_dieu", "doc_id": "ldd2024", "dieu": "Dieu 79"}], "complexity": "simple", "summary_update": null, "direct_response": null}
 
-INPUT: "Quyen cua nguoi su dung dat la gi?"
-OUTPUT: {"reasoning": "Cau hoi chung ve quyen su dung dat, can search", "actions": [{"tool": "search_legal_docs", "query": "quyen cua nguoi su dung dat theo Luat Dat Dai 2024", "filters": {"doc_ids": ["ldd2024"]}}], "complexity": "simple", "summary_update": null, "direct_response": null}
+INPUT: "Quyền của người sử dụng đất là gì?"
+OUTPUT: {"reasoning": "Câu hỏi chung về quyền sử dụng đất, cần search", "actions": [{"tool": "search_legal_docs", "query": "quyền của người sử dụng đất theo Luật Đất Đai 2024", "filters": {"doc_ids": ["ldd2024"]}}], "complexity": "simple", "summary_update": null, "direct_response": null}
 
-INPUT: "ND 49 sua doi gi cua ND 102?"
-OUTPUT: {"reasoning": "Hoi ve sua doi giua 2 ND, can lookup_amendment va search", "actions": [{"tool": "lookup_amendment", "target_doc": "nd102", "source_doc": "nd49"}, {"tool": "search_legal_docs", "query": "Nghi dinh 49/2026 sua doi bo sung Nghi dinh 102/2024 chi tiet thi hanh Luat Dat Dai", "filters": {"doc_ids": ["nd49"]}}], "complexity": "complex", "summary_update": null, "direct_response": null}
+INPUT: "NĐ 49 sửa đổi gì của NĐ 102?"
+OUTPUT: {"reasoning": "Hỏi về sửa đổi giữa 2 NĐ, cần lookup_amendment và search", "actions": [{"tool": "lookup_amendment", "target_doc": "nd102", "source_doc": "nd49"}, {"tool": "search_legal_docs", "query": "Nghị định 49/2026 sửa đổi bổ sung Nghị định 102/2024 chi tiết thi hành Luật Đất Đai", "filters": {"doc_ids": ["nd49"]}}], "complexity": "complex", "summary_update": null, "direct_response": null}
 </examples>"""
+
+
+GENERATOR_INSTRUCTIONS = """
+<output-format>
+Khi trả lời dựa trên tài liệu pháp luật:
+- Trích dẫn theo format: "Theo [khoản X] Điều Y [Tên văn bản]..." hoặc "Căn cứ Điều Y [Tên văn bản]..."
+- Khi nhiều văn bản cùng điều chỉnh một vấn đề, trình bày theo thứ tự: luật gốc → nghị định hướng dẫn → nghị định sửa đổi mới nhất
+- Dùng bullet points khi liệt kê nhiều điều kiện, quyền, nghĩa vụ
+- Kết thúc bằng lưu ý về văn bản áp dụng nếu có sửa đổi gần đây
+</output-format>
+
+<examples>
+TÌNH HUỐNG 1 — Câu hỏi đơn giản, một văn bản:
+Câu hỏi: "Người sử dụng đất có những quyền gì?"
+Trả lời mẫu:
+Theo **Điều 27 Luật Đất Đai 2024**, người sử dụng đất có các quyền chung sau:
+- Được cấp Giấy chứng nhận quyền sử dụng đất
+- Hưởng thành quả lao động, kết quả đầu tư trên đất
+- Được Nhà nước bảo hộ khi quyền sử dụng đất bị xâm phạm
+- Khiếu nại, tố cáo, khởi kiện về những hành vi vi phạm quyền sử dụng đất hợp pháp của mình
+- Chuyển đổi, chuyển nhượng, cho thuê, tặng cho, thừa kế, thế chấp quyền sử dụng đất (tùy loại đất và điều kiện cụ thể)
+
+TÌNH HUỐNG 2 — Câu hỏi liên quan đến sửa đổi giữa các nghị định:
+Câu hỏi: "Thủ tục thu hồi đất theo NĐ 49 thay đổi gì so với NĐ 88?"
+Trả lời mẫu:
+**Nghị định 49/2026/NĐ-CP** sửa đổi, bổ sung một số điều của **Nghị định 88/2024/NĐ-CP** về bồi thường, hỗ trợ, tái định cư khi Nhà nước thu hồi đất.
+
+Theo **khoản 2 Điều 5 Nghị định 49/2026** (sửa đổi Điều 10 Nghị định 88/2024), các thay đổi chính gồm:
+- [nội dung sửa đổi từ tài liệu]
+- [nội dung sửa đổi từ tài liệu]
+
+**Lưu ý:** Kể từ ngày Nghị định 49/2026 có hiệu lực, các quy định tại Nghị định 88/2024 bị sửa đổi sẽ không còn áp dụng. Cần đối chiếu cả hai văn bản để xác định quy định hiện hành.
+</examples>"""
+
+
+_STATUS_READING = [
+    "Mình đang đọc câu hỏi của bạn...",
+    "Đang phân tích câu hỏi...",
+    "Mình đang xem xét câu hỏi này...",
+]
+
+_STATUS_SEARCHING = [
+    "Mình đang tra cứu tài liệu pháp luật...",
+    "Đang tìm kiếm trong văn bản pháp luật...",
+    "Mình đang kiểm tra trong tài liệu...",
+]
+
+_STATUS_GENERATING = [
+    "Mình đang soạn câu trả lời...",
+    "Đang tổng hợp thông tin...",
+    "Mình đang chuẩn bị câu trả lời...",
+    "Đang xem xét và soạn thảo...",
+]
+
+
+def _model_for_complexity(complexity: str) -> tuple[str, float]:
+    """Return (model_name, temperature) based on query complexity."""
+    if complexity == "complex":
+        return "pro", 0.1
+    return "flash", 0.0
 
 
 # -- Legal keyword guardrail --
@@ -235,12 +296,12 @@ def _build_generator_prompt(
 
     Returns (system_prompt, history_for_llm, user_prompt).
     """
-    system = SYSTEM_BASE
+    system = SYSTEM_BASE + GENERATOR_INSTRUCTIONS
 
     history = []
     if summary:
         history.append({"role": "user", "content": f"<conversation-summary>\n{summary}\n</conversation-summary>"})
-        history.append({"role": "model", "content": "Da ghi nhan."})
+        history.append({"role": "model", "content": "Đã ghi nhận."})
     history.extend(recent_messages)
 
     if context:
@@ -252,28 +313,28 @@ def _build_generator_prompt(
 {user_message}
 </user-question>
 
-Hay tra loi cau hoi dua tren tai lieu tham khao o tren.
-Yeu cau:
-- Trich dan cu the so dieu, khoan, diem va ten van ban (vd: "Theo Dieu 79 Luat Dat Dai 2024...")
-- Neu co nhieu van ban lien quan, giai thich moi quan he (luat goc -> nghi dinh huong dan -> nghi dinh sua doi)
-- Neu thong tin trong tai lieu khong du de tra loi day du, noi ro phan nao chua tim thay
-- Tra loi co cau truc, dung bullet points khi liet ke nhieu muc
-- Khong tu them thong tin ngoai tai lieu duoc cung cap"""
+Hãy trả lời câu hỏi dựa trên tài liệu tham khảo ở trên.
+Yêu cầu:
+- Trích dẫn cụ thể số điều, khoản, điểm và tên văn bản (vd: "Theo Điều 79 Luật Đất Đai 2024...")
+- Nếu có nhiều văn bản liên quan, giải thích mối quan hệ (luật gốc -> nghị định hướng dẫn -> nghị định sửa đổi)
+- Nếu thông tin trong tài liệu không đủ để trả lời đầy đủ, nói rõ phần nào chưa tìm thấy
+- Trả lời có cấu trúc, dùng bullet points khi liệt kê nhiều mục
+- Không tự thêm thông tin ngoài tài liệu được cung cấp"""
     else:
         prompt = f"""<user-question>
 {user_message}
 </user-question>
 
-Toi khong tim thay tai lieu lien quan trong co so du lieu cho cau hoi nay.
-Hay noi ro voi nguoi dung rang ban khong tim thay thong tin cu the trong cac van ban hien co.
-Goi y ho cach hoi cu the hon, vi du: chi dinh so dieu, ten van ban (Luat Dat Dai, ND 102...), hoac mo ta tinh huong cu the."""
+Tôi không tìm thấy tài liệu liên quan trong cơ sở dữ liệu cho câu hỏi này.
+Hãy nói rõ với người dùng rằng bạn không tìm thấy thông tin cụ thể trong các văn bản hiện có.
+Gợi ý họ cách hỏi cụ thể hơn, ví dụ: chỉ định số điều, tên văn bản (Luật Đất Đai, NĐ 102...), hoặc mô tả tình huống cụ thể."""
 
     return system, history, prompt
 
 
 # -- Orchestrator --
 
-def _parse_orchestrator_response(text: str) -> dict:
+def _parse_orchestrator_response(text: str, user_message: str = "") -> dict:
     """Parse the orchestrator's JSON response, handling edge cases."""
     text = text.strip()
     # Strip markdown code fences if present
@@ -286,7 +347,17 @@ def _parse_orchestrator_response(text: str) -> dict:
     try:
         result = json.loads(text)
     except json.JSONDecodeError:
-        logger.warning("Orchestrator returned invalid JSON, treating as direct response: %s", text[:200])
+        logger.warning("Orchestrator returned invalid JSON: %s", text[:200])
+        # If it looks like truncated orchestrator JSON, fall back to retrieval
+        # instead of showing raw JSON to the user
+        if text.lstrip().startswith("{"):
+            return {
+                "reasoning": "Failed to parse orchestrator JSON, falling back to retrieval",
+                "actions": [{"tool": "search_legal_docs", "query": user_message, "filters": {}}],
+                "complexity": "simple",
+                "summary_update": None,
+                "direct_response": None,
+            }
         return {
             "reasoning": "Failed to parse orchestrator output",
             "actions": [],
@@ -388,7 +459,7 @@ async def handle_message(session_id: str, user_message: str) -> dict:
         temperature=0.0,
         max_tokens=1000,
     )
-    decision = _parse_orchestrator_response(orch_raw)
+    decision = _parse_orchestrator_response(orch_raw, user_message)
     logger.info(
         "[%s] turn=%d orchestrator: complexity=%s actions=%d direct=%s (%.1fs)",
         session_id[:8], turn, decision["complexity"],
@@ -439,7 +510,7 @@ async def handle_message(session_id: str, user_message: str) -> dict:
 
     # -- Stage 3: Generator --
     t_gen = time.monotonic()
-    model = "pro" if decision["complexity"] == "complex" else "flash"
+    model, temperature = _model_for_complexity(decision["complexity"])
     gen_system, gen_history, gen_prompt = _build_generator_prompt(
         user_message, context, recent_messages, summary,
     )
@@ -449,7 +520,7 @@ async def handle_message(session_id: str, user_message: str) -> dict:
         system=gen_system,
         history=gen_history,
         model=model,
-        temperature=0.3,
+        temperature=temperature,
         max_tokens=6000,
     )
     logger.info("[%s] generator (%s): %d chars (%.1fs)", session_id[:8], model, len(response), time.monotonic() - t_gen)
@@ -507,7 +578,7 @@ async def handle_message_stream(session_id: str, user_message: str):
     recent_messages, summary = await _assemble_conversation_context(history, session_id)
 
     # -- Stage 1: Orchestrator --
-    yield ("status", {"text": "Đang phân tích câu hỏi...", "step": "orchestrator"})
+    yield ("status", {"text": random.choice(_STATUS_READING), "step": "orchestrator"})
 
     orch_messages = _trim_for_orchestrator(recent_messages)
     orch_system, orch_history, orch_prompt = _build_orchestrator_prompt(
@@ -515,9 +586,9 @@ async def handle_message_stream(session_id: str, user_message: str):
     )
     orch_raw = await llm.generate(
         prompt=orch_prompt, system=orch_system, history=orch_history,
-        model="orchestrator", temperature=0.0, max_tokens=1000,
+        model="orchestrator", temperature=0.0, max_tokens=1500,
     )
-    decision = _parse_orchestrator_response(orch_raw)
+    decision = _parse_orchestrator_response(orch_raw, user_message)
     logger.info("[%s] turn=%d orchestrator: complexity=%s actions=%d direct=%s",
                 session_id[:8], turn, decision["complexity"],
                 len(decision["actions"]), bool(decision["direct_response"]))
@@ -551,7 +622,7 @@ async def handle_message_stream(session_id: str, user_message: str):
         return
 
     # -- Stage 2: Execute tools --
-    yield ("status", {"text": "Đang tìm kiếm văn bản pháp luật...", "step": "retrieval"})
+    yield ("status", {"text": random.choice(_STATUS_SEARCHING), "step": "retrieval"})
     chunks = await _execute_tools(decision["actions"])
     logger.info("[%s] tools returned %d chunks", session_id[:8], len(chunks))
 
@@ -559,13 +630,10 @@ async def handle_message_stream(session_id: str, user_message: str):
     sources = extract_sources(chunks)
     yield ("sources", {"sources": sources})
 
-    # -- Stage 3: Reranking status --
-    yield ("status", {"text": "Đang xếp hạng kết quả...", "step": "reranking"})
+    # -- Stage 3: Generator (streaming) --
+    yield ("status", {"text": random.choice(_STATUS_GENERATING), "step": "generating"})
 
-    # -- Stage 4: Generator (streaming) --
-    yield ("status", {"text": "Đang tạo câu trả lời...", "step": "generating"})
-
-    model = "pro" if decision["complexity"] == "complex" else "flash"
+    model, temperature = _model_for_complexity(decision["complexity"])
     gen_system, gen_history, gen_prompt = _build_generator_prompt(
         user_message, context, recent_messages, summary,
     )
@@ -573,7 +641,7 @@ async def handle_message_stream(session_id: str, user_message: str):
     full_response_parts = []
     async for chunk_text in llm.generate_stream(
         prompt=gen_prompt, system=gen_system, history=gen_history,
-        model=model, temperature=0.3, max_tokens=6000,
+        model=model, temperature=temperature, max_tokens=6000,
     ):
         full_response_parts.append(chunk_text)
         yield ("token", {"text": chunk_text})
@@ -613,12 +681,12 @@ async def handle_message_stream(session_id: str, user_message: str):
 async def _generate_title(session_id: str, question: str, answer: str) -> None:
     """Auto-generate a session title from first exchange."""
     try:
-        prompt = f"""Tao tieu de ngan gon (duoi 50 ky tu) cho cuoc hoi thoai bat dau voi cau hoi sau.
-Chi tra ve tieu de, khong giai thich, khong dau ngoac kep.
+        prompt = f"""Tạo tiêu đề ngắn gọn (dưới 50 ký tự) cho cuộc hội thoại bắt đầu với câu hỏi sau.
+Chỉ trả về tiêu đề, không giải thích, không dấu ngoặc kép.
 
-Cau hoi: {question[:200]}
+Câu hỏi: {question[:200]}
 
-Tieu de:"""
+Tiêu đề:"""
         title = await llm.generate(prompt, model="utility", temperature=0.0, max_tokens=60)
         if title and len(title.strip()) > 3:
             await asyncio.to_thread(db.update_session_title, session_id, title.strip()[:80])
