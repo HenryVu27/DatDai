@@ -619,6 +619,7 @@ async function switchSession(id, title) {
       if (m.sources) {
         try { sources = JSON.parse(m.sources); } catch(_) {}
       }
+      if (m.role === 'user') lastUserQuestion = m.content;
       addMessage(m.role, m.content, sources);
     });
   } catch(e) {
@@ -633,6 +634,7 @@ async function switchSession(id, title) {
 
 async function newChat() {
   currentSessionId = null;
+  lastUserQuestion = '';
   localStorage.removeItem('datdai_session_id');
   topbarTitle.textContent = 'Cuộc hội thoại mới';
   chatArea.innerHTML = `
