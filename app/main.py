@@ -178,6 +178,12 @@ def create_session():
     return {"session_id": session_id}
 
 
+@app.delete("/sessions/{session_id}")
+def delete_session_endpoint(session_id: str):
+    db.delete_session(session_id)
+    return {"status": "ok"}
+
+
 class FeedbackRequest(BaseModel):
     trace_id: str
     score: int  # 1 = thumbs up, 0 = thumbs down

@@ -328,3 +328,21 @@ def update_session_title(session_id: str, title: str) -> None:
         db.execute(sql, (title, session_id))
         db.commit()
     _release_db(db)
+
+
+def delete_session(session_id: str) -> None:
+    """Delete a session and all its messages and summaries (cascade)."""
+    db = _get_db()
+    p = _ph()
+    if _use_pg:
+        with db.cursor() as cur:
+            cur.execute(f"DELETE FROM summaries WHERE session_id = {p}", (session_id,))
+            cur.execute(f"DELETE FROM messages WHERE session_id = {p}", (session_id,))
+            cur.execute(f"DELETE FROM sessions WHERE id = {p}", (session_id,))
+        db.commit()
+    else:
+        db.execute(f"DELETE FROM summaries WHERE session_id = {p}", (session_id,))
+        db.execute(f"DELETE FROM messages WHERE session_id = {p}", (session_id,))
+        db.execute(f"DELETE FROM sessions WHERE id = {p}", (session_id,))
+        db.commit()
+    _release_db(db)
