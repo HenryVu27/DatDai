@@ -54,9 +54,5 @@ jobs:
             --concurrency 5 \
             --timeout 120 \
             --set-secrets "GEMINI_API_KEY=GEMINI_API_KEY:latest,QDRANT_URL=QDRANT_URL:latest,QDRANT_API_KEY=QDRANT_API_KEY:latest,SUPABASE_DB_URL=SUPABASE_DB_URL:latest,SUPABASE_URL=SUPABASE_URL:latest,SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,LANGFUSE_PUBLIC_KEY=LANGFUSE_PUBLIC_KEY:latest,LANGFUSE_SECRET_KEY=LANGFUSE_SECRET_KEY:latest" \
-            --startup-cpu-boost \
-            --startup-probe-path /health \
-            --startup-probe-initial-delay 5 \
-            --startup-probe-timeout 3 \
-            --startup-probe-period 5 \
-            --startup-probe-failure-threshold 6
+            --cpu-boost \
+            --startup-probe httpGet.path=/health,initialDelaySeconds=5,timeoutSeconds=3,periodSeconds=5,failureThreshold=6
