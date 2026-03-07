@@ -112,6 +112,12 @@ body { display: flex; }
 .sessions-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
 .session-item {
+  background: none;
+  border: none;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+  display: block;
   padding: 0.6rem 0.75rem;
   border-radius: var(--radius);
   cursor: pointer;
@@ -600,6 +606,7 @@ async function loadSessions() {
     sessionsList.innerHTML = '';
     sessions.forEach(s => {
       const div = document.createElement('button');
+      div.type = 'button';
       div.setAttribute('role', 'listitem');
       div.className = 'session-item' + (s.id === currentSessionId ? ' active' : '');
       div.dataset.id = s.id;
