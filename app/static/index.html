@@ -441,6 +441,7 @@ body { display: flex; }
 }
 .feedback-btn:hover { border-color: var(--accent); color: var(--text-secondary); }
 .feedback-btn.selected { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.feedback-btn.regenerate { margin-left: 0.25rem; }
 </style>
 </head>
 <body>
@@ -516,6 +517,7 @@ let currentSessionId = null;
 let isLoading = false;
 let currentController = null;
 let userAborted = false;
+let lastUserQuestion = '';
 
 const SEND_ICON = '<svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
 const STOP_ICON = '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>';
@@ -706,11 +708,14 @@ function addMessage(role, content, sources, traceId) {
     });
     html += `</div>`;
   }
-  if (role === 'assistant' && traceId) {
-    html += `<div class="feedback" data-trace-id="${esc(traceId)}">
-      <button class="feedback-btn" onclick="sendFeedback(this, 1)" title="Hữu ích">&#x1F44D;</button>
-      <button class="feedback-btn" onclick="sendFeedback(this, 0)" title="Chưa tốt">&#x1F44E;</button>
-    </div>`;
+  if (role === 'assistant') {
+    html += `<div class="feedback"${traceId ? ` data-trace-id="${esc(traceId)}"` : ''}>`;
+    if (traceId) {
+      html += `<button class="feedback-btn" onclick="sendFeedback(this, 1)" title="Hữu ích" aria-label="Phản hồi hữu ích">&#x1F44D;</button>`;
+      html += `<button class="feedback-btn" onclick="sendFeedback(this, 0)" title="Chưa tốt" aria-label="Phản hồi chưa tốt">&#x1F44E;</button>`;
+    }
+    html += `<button class="feedback-btn regenerate" onclick="regenerateResponse()" title="Tạo lại câu trả lời" aria-label="Tạo lại câu trả lời">&#x21BB;</button>`;
+    html += `</div>`;
   }
   html += `</div>`;
   div.innerHTML = html;
@@ -773,6 +778,19 @@ async function sendFeedback(btn, score) {
       body: JSON.stringify({ trace_id: traceId, score }),
     });
   } catch(e) {}
+}
+
+function regenerateResponse() {
+  if (!lastUserQuestion || isLoading) return;
+
+  // Remove the last assistant message
+  const messages = chatArea.querySelectorAll('.message.assistant');
+  const lastAssistant = messages[messages.length - 1];
+  if (lastAssistant) lastAssistant.remove();
+
+  // Re-submit
+  input.value = lastUserQuestion;
+  document.getElementById('input-form').dispatchEvent(new Event('submit'));
 }
 
 function createStreamingBubble() {
@@ -843,12 +861,13 @@ function finalizeBubble(msgDiv, fullText, sources, traceId) {
     });
     html += '</div>';
   }
+  html += `<div class="feedback"${traceId ? ` data-trace-id="${esc(traceId)}"` : ''}>`;
   if (traceId) {
-    html += `<div class="feedback" data-trace-id="${esc(traceId)}">
-      <button class="feedback-btn" onclick="sendFeedback(this, 1)" title="Hữu ích">&#x1F44D;</button>
-      <button class="feedback-btn" onclick="sendFeedback(this, 0)" title="Chưa tốt">&#x1F44E;</button>
-    </div>`;
+    html += `<button class="feedback-btn" onclick="sendFeedback(this, 1)" title="Hữu ích" aria-label="Phản hồi hữu ích">&#x1F44D;</button>`;
+    html += `<button class="feedback-btn" onclick="sendFeedback(this, 0)" title="Chưa tốt" aria-label="Phản hồi chưa tốt">&#x1F44E;</button>`;
   }
+  html += `<button class="feedback-btn regenerate" onclick="regenerateResponse()" title="Tạo lại câu trả lời" aria-label="Tạo lại câu trả lời">&#x21BB;</button>`;
+  html += `</div>`;
   bubble.innerHTML = html;
   chatArea.scrollTop = chatArea.scrollHeight;
 }
@@ -882,6 +901,7 @@ async function handleSubmit(e) {
   e.preventDefault();
   const question = input.value.trim();
   if (!question || isLoading) return;
+  lastUserQuestion = question;
 
   isLoading = true;
   setSendButtonState(true);
