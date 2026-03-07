@@ -485,7 +485,7 @@ body { display: flex; }
       </div>
       <h2>Tư vấn Luật Đất Đai</h2>
       <p>Hỏi bất kỳ câu hỏi nào về Luật Đất Đai 2024, các nghị định hướng dẫn, thủ tục đất đai. Tôi sẽ trích dẫn cụ thể điều khoản cho bạn.</p>
-      <div class="suggestions">
+      <div class="suggestions" id="suggestions">
         <button class="suggestion" onclick="askSuggestion(this)">Điều kiện để được cấp giấy chứng nhận quyền sử dụng đất?</button>
         <button class="suggestion" onclick="askSuggestion(this)">Thủ tục thu hồi đất để thực hiện dự án như thế nào?</button>
         <button class="suggestion" onclick="askSuggestion(this)">Quyền và nghĩa vụ của người sử dụng đất là gì?</button>
@@ -515,6 +515,41 @@ const topbarTitle = document.getElementById('topbar-title');
 
 let currentSessionId = null;
 let isLoading = false;
+
+// ===== Suggestion Pool =====
+const SUGGESTION_POOL = [
+  'Điều kiện để được cấp giấy chứng nhận quyền sử dụng đất?',
+  'Thủ tục thu hồi đất để thực hiện dự án như thế nào?',
+  'Quyền và nghĩa vụ của người sử dụng đất là gì?',
+  'Cách tính tiền sử dụng đất khi được giao đất?',
+  'Thời hạn sử dụng đất ở là bao lâu?',
+  'Trường hợp nào được miễn tiền sử dụng đất?',
+  'Đất nông nghiệp có được chuyển sang đất ở không?',
+  'Thủ tục đăng ký biến động đất đai gồm những gì?',
+  'Giá đất được xác định theo phương pháp nào?',
+  'Khi nào Nhà nước thu hồi đất không bồi thường?',
+  'Hộ gia đình có được tặng cho quyền sử dụng đất không?',
+  'Người Việt Nam định cư ở nước ngoài có quyền gì về đất đai?',
+  'Đất công ích xã, phường, thị trấn được sử dụng thế nào?',
+  'Thủ tục hòa giải tranh chấp đất đai tại UBND xã?',
+  'Mức bồi thường khi Nhà nước thu hồi đất ở được tính ra sao?',
+  'Điều kiện để tách thửa đất theo quy định mới?',
+];
+
+function getRandomSuggestions(count = 4) {
+  const pool = [...SUGGESTION_POOL];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count);
+}
+
+function buildSuggestionsHTML() {
+  return getRandomSuggestions().map(q =>
+    `<button class="suggestion" onclick="askSuggestion(this)">${esc(q)}</button>`
+  ).join('');
+}
 
 // Restore last session from localStorage
 const savedSessionId = localStorage.getItem('datdai_session_id');
@@ -597,13 +632,9 @@ async function newChat() {
       </div>
       <h2>Tư vấn Luật Đất Đai</h2>
       <p>Hỏi bất kỳ câu hỏi nào về Luật Đất Đai 2024, các nghị định hướng dẫn, thủ tục đất đai. Tôi sẽ trích dẫn cụ thể điều khoản cho bạn.</p>
-      <div class="suggestions">
-        <button class="suggestion" onclick="askSuggestion(this)">Điều kiện để được cấp giấy chứng nhận quyền sử dụng đất?</button>
-        <button class="suggestion" onclick="askSuggestion(this)">Thủ tục thu hồi đất để thực hiện dự án như thế nào?</button>
-        <button class="suggestion" onclick="askSuggestion(this)">Quyền và nghĩa vụ của người sử dụng đất là gì?</button>
-        <button class="suggestion" onclick="askSuggestion(this)">Cách tính tiền sử dụng đất khi được giao đất?</button>
-      </div>
+      <div class="suggestions" id="suggestions"></div>
     </div>`;
+  document.getElementById('suggestions').innerHTML = buildSuggestionsHTML();
 
   if (window.innerWidth <= 768) {
     sidebar.classList.remove('show');
@@ -924,6 +955,9 @@ async function handleSubmit(e) {
 }
 
 // ===== Init =====
+const suggestionsEl = document.getElementById('suggestions');
+if (suggestionsEl) suggestionsEl.innerHTML = buildSuggestionsHTML();
+
 loadSessions().then(() => {
   if (currentSessionId) {
     const title = document.querySelector(`.session-item.active`)?.textContent || 'Cuoc hoi thoai';
