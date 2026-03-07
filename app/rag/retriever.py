@@ -5,7 +5,7 @@ Results are merged and reranked in the orchestrator pipeline.
 """
 import logging
 from app import llm
-from app.config import RAG_RERANK_CANDIDATES, RAG_RERANKER_MODEL, RAG_RELEVANCE_THRESHOLD, RAG_USE_RERANKER, RAG_TOP_K
+from app.config import RAG_RERANK_CANDIDATES, RAG_RELEVANCE_THRESHOLD, RAG_USE_RERANKER, RAG_TOP_K
 from app.rag.knowledge_store import KnowledgeStore
 from app.rag.reranker import CrossEncoderReranker
 from app.rag.cross_ref import AMENDED_BY
@@ -30,7 +30,7 @@ def _get_reranker() -> CrossEncoderReranker | None:
     global _reranker
     if _reranker is None and RAG_USE_RERANKER:
         try:
-            _reranker = CrossEncoderReranker(model_name=RAG_RERANKER_MODEL)
+            _reranker = CrossEncoderReranker()
         except Exception as e:
             logger.warning("Reranker init failed: %s", e)
     return _reranker
