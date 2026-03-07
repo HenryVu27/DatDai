@@ -748,13 +748,10 @@ function addMessage(role, content, sources, traceId) {
     });
     html += `</div>`;
   }
-  if (role === 'assistant') {
-    html += `<div class="feedback"${traceId ? ` data-trace-id="${esc(traceId)}"` : ''}>`;
-    if (traceId) {
-      html += `<button class="feedback-btn" onclick="sendFeedback(this, 1)" title="Hữu ích" aria-label="Phản hồi hữu ích">&#x1F44D;</button>`;
-      html += `<button class="feedback-btn" onclick="sendFeedback(this, 0)" title="Chưa tốt" aria-label="Phản hồi chưa tốt">&#x1F44E;</button>`;
-    }
-    html += `<button class="feedback-btn regenerate" onclick="regenerateResponse()" title="Tạo lại câu trả lời" aria-label="Tạo lại câu trả lời">&#x21BB;</button>`;
+  if (role === 'assistant' && traceId) {
+    html += `<div class="feedback" data-trace-id="${esc(traceId)}">`;
+    html += `<button class="feedback-btn" onclick="sendFeedback(this, 1)" title="Hữu ích" aria-label="Phản hồi hữu ích">&#x1F44D;</button>`;
+    html += `<button class="feedback-btn" onclick="sendFeedback(this, 0)" title="Chưa tốt" aria-label="Phản hồi chưa tốt">&#x1F44E;</button>`;
     html += `</div>`;
   }
   html += `</div>`;
@@ -905,6 +902,9 @@ function finalizeBubble(msgDiv, fullText, sources, traceId) {
     });
     html += '</div>';
   }
+  // Remove regenerate button from previous messages
+  chatArea.querySelectorAll('.feedback-btn.regenerate').forEach(btn => btn.remove());
+
   html += `<div class="feedback"${traceId ? ` data-trace-id="${esc(traceId)}"` : ''}>`;
   if (traceId) {
     html += `<button class="feedback-btn" onclick="sendFeedback(this, 1)" title="Hữu ích" aria-label="Phản hồi hữu ích">&#x1F44D;</button>`;
