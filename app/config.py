@@ -44,7 +44,7 @@ QDRANT_COLLECTION = "dat_dai_law"
 # Retrieval
 RAG_TOP_K = 8
 RAG_RERANK_CANDIDATES = 20
-RAG_RERANKER_MODEL = "jinaai/jina-reranker-v2-base-multilingual"
+RAG_RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 RAG_RELEVANCE_THRESHOLD = 0.15
 RAG_USE_RERANKER = True
 
