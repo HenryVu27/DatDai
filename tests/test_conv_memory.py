@@ -4,6 +4,52 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 
+class TestSalvageTruncatedJson:
+    def test_complete_json_returned_as_is(self):
+        from app.memory.conv_memory import _salvage_truncated_json
+        raw = '{"chu_de": "boi thuong", "van_ban": "Dieu 79"}'
+        assert _salvage_truncated_json(raw) == {"chu_de": "boi thuong", "van_ban": "Dieu 79"}
+
+    def test_truncated_mid_string_value(self):
+        from app.memory.conv_memory import _salvage_truncated_json
+        # Cut off inside the second string value
+        raw = '{"chu_de": "boi thuong", "van_ban": "Luat Dat Dai 2024 (31/2024/QH'
+        result = _salvage_truncated_json(raw)
+        assert result is not None
+        assert result["chu_de"] == "boi thuong"
+
+    def test_truncated_after_complete_pair(self):
+        from app.memory.conv_memory import _salvage_truncated_json
+        raw = '{"chu_de": "gia dat", "so_dieu": 3, "van_ban": "ND 71'
+        result = _salvage_truncated_json(raw)
+        assert result is not None
+        assert result["chu_de"] == "gia dat"
+        assert result["so_dieu"] == 3
+
+    def test_returns_none_for_garbage(self):
+        from app.memory.conv_memory import _salvage_truncated_json
+        assert _salvage_truncated_json("not json at all") is None
+
+    def test_truncated_with_list_value(self):
+        from app.memory.conv_memory import _salvage_truncated_json
+        raw = '{"chu_de": "boi thuong", "danh_sach": ["1. A", "2. B", "3. C"]}'
+        result = _salvage_truncated_json(raw)
+        assert result is not None
+        assert result["danh_sach"] == ["1. A", "2. B", "3. C"]
+
+    @pytest.mark.asyncio
+    @patch("app.memory.conv_memory.llm")
+    async def test_extract_state_salvages_truncated_llm_output(self, mock_llm):
+        from app.memory.conv_memory import extract_state
+        # Simulate LLM returning truncated JSON (cut mid-string)
+        mock_llm.generate = AsyncMock(
+            return_value='{"chu_de": "nghia vu tai chinh", "van_ban": "Luat Dat Dai 2024 (31/2024/QH'
+        )
+        result = await extract_state(response="...", prev_state=None)
+        assert result is not None
+        assert result["chu_de"] == "nghia vu tai chinh"
+
+
 class TestConvMemoryExtract:
 
     @pytest.mark.asyncio

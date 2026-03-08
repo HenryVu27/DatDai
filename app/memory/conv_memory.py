@@ -37,6 +37,32 @@ Vi du dau ra cho hoi thoai ve thu tuc:
 {"chu_de": "thu tuc cap so do lan dau", "cac_buoc": ["1. Chuan bi ho so", "2. Nop tai UBND", "3. Nhan ket qua"], "co_quan": "UBND cap huyen"}"""
 
 
+def _salvage_truncated_json(raw: str) -> dict | None:
+    """Try to recover a partial JSON object by closing it at the last complete value.
+
+    Handles the common case where the LLM output is cut off mid-string or mid-value
+    due to a token limit. Walks back from the end to find the last clean boundary
+    (after a complete string value or array), then closes the object.
+    """
+    # Find the opening brace
+    start = raw.find("{")
+    if start == -1:
+        return None
+    fragment = raw[start:]
+
+    # Try progressively shorter fragments, closing the object each time
+    # Walk back to find a position after a complete value (string end " or ] or digit)
+    for i in range(len(fragment) - 1, 0, -1):
+        ch = fragment[i]
+        if ch in ('"', ']', '}') or ch.isdigit():
+            candidate = fragment[:i + 1].rstrip().rstrip(",") + "}"
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
 async def extract_state(response: str, prev_state: dict | None) -> dict | None:
     """Extract conversation state from an assistant response.
 
@@ -59,16 +85,22 @@ async def extract_state(response: str, prev_state: dict | None) -> dict | None:
             system=_EXTRACTOR_SYSTEM,
             model="utility",
             temperature=0.0,
-            max_tokens=800,
+            max_tokens=600,
         )
         raw = raw.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(l for l in lines[1:] if not l.strip().startswith("```"))
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("State extractor returned invalid JSON: %s", raw[:100] if 'raw' in dir() else "?")
-        return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            # Truncated JSON — salvage complete key-value pairs up to last valid comma or brace
+            salvaged = _salvage_truncated_json(raw)
+            if salvaged is not None:
+                logger.debug("State extractor: salvaged truncated JSON (%d chars -> %d keys)", len(raw), len(salvaged))
+                return salvaged
+            logger.warning("State extractor returned invalid JSON: %s", raw[:100])
+            return None
     except Exception as e:
         logger.error("State extractor failed: %s", e)
         return None
