@@ -14,6 +14,7 @@ import uuid
 
 from app import db, llm
 from app.config import CONTEXT_MAX_TURN_GROUPS, CONTEXT_MAX_CHARS, ORCH_MAX_TURN_GROUPS, ORCH_MAX_CHARS
+from app.memory import conv_memory
 from app.rag.retriever import (
     search_legal_docs, lookup_amendment, lookup_specific_dieu,
     build_context, extract_sources,
@@ -433,10 +434,11 @@ async def handle_message(session_id: str, user_message: str) -> dict:
 
     # Assemble conversation context
     recent_messages, summary = await _assemble_conversation_context(history, session_id)
+    conv_state = conv_memory.read(session_id)
 
     # -- Stage 0: Query rewriting --
     t_rewrite = time.monotonic()
-    rewrite_result = await rewrite_query(user_message, summary, recent_messages)
+    rewrite_result = await rewrite_query(user_message, summary, recent_messages, conv_state=conv_state)
 
     # Off-topic short-circuit — skip orchestrator entirely
     if not rewrite_result.get("is_in_scope", True):
@@ -561,6 +563,12 @@ async def handle_message(session_id: str, user_message: str) -> dict:
         (turn, "assistant", response, sources),
     ])
 
+    # Background: update conversation state from this response
+    asyncio.create_task(_safe_background(
+        lambda: conv_memory.update(session_id, response, turn),
+        label="conv_state_update",
+    ))
+
     # Auto-generate title for new sessions
     if turn == 1:
         asyncio.create_task(_safe_background(
@@ -604,11 +612,12 @@ async def handle_message_stream(session_id: str, user_message: str):
     history = await asyncio.to_thread(db.get_messages, session_id)
     turn = max((m["turn"] for m in history), default=0) + 1
     recent_messages, summary = await _assemble_conversation_context(history, session_id)
+    conv_state = conv_memory.read(session_id)
 
     yield ("status", {"text": random.choice(_STATUS_READING), "step": "orchestrator"})
 
     # -- Stage 0: Query rewriting --
-    rewrite_result = await rewrite_query(user_message, summary, recent_messages)
+    rewrite_result = await rewrite_query(user_message, summary, recent_messages, conv_state=conv_state)
 
     # Off-topic short-circuit — skip orchestrator entirely
     if not rewrite_result.get("is_in_scope", True):
@@ -718,6 +727,12 @@ async def handle_message_stream(session_id: str, user_message: str):
         (turn, "user", user_message, None),
         (turn, "assistant", response, sources),
     ])
+
+    # Background: update conversation state from this response
+    asyncio.create_task(_safe_background(
+        lambda: conv_memory.update(session_id, response, turn),
+        label="conv_state_update",
+    ))
 
     if turn == 1:
         asyncio.create_task(_safe_background(

@@ -1,6 +1,7 @@
 """Tests for the orchestrator pipeline logic (no LLM calls)."""
 import json
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 from app.chat import (
     _parse_orchestrator_response,
     _should_force_retrieval,
@@ -171,3 +172,65 @@ class TestBackgroundTaskReliability:
 
         await _safe_background(succeeds, label="test_task")
         assert call_count == 1
+
+
+class TestConvStateWiring:
+    """C3, H3: Conv state is read at start and updated after each turn."""
+
+    @pytest.mark.asyncio
+    @patch("app.chat.conv_memory")
+    @patch("app.chat.rewrite_query")
+    @patch("app.chat.db")
+    async def test_conv_state_read_at_start_of_turn(
+        self, mock_db, mock_rewrite, mock_memory
+    ):
+        from app.chat import handle_message
+
+        mock_db.create_session = MagicMock()
+        mock_db.get_messages = MagicMock(return_value=[])
+        mock_db.get_latest_summary = MagicMock(return_value=None)
+        mock_db.get_conv_state = MagicMock(return_value={"topic": "test"})
+        mock_db.add_messages_batch = MagicMock()
+        mock_memory.read = MagicMock(return_value={"topic": "test"})
+
+        mock_rewrite.return_value = {
+            "is_in_scope": False,  # Short circuit after rewrite
+            "standalone_query": "test",
+            "search_queries": [],
+            "filters": {"doc_ids": None, "dieu": None},
+        }
+        mock_db.add_message = MagicMock()
+
+        await handle_message("sess1", "test message")
+
+        mock_memory.read.assert_called_once_with("sess1")
+
+    @pytest.mark.asyncio
+    @patch("app.chat.conv_memory")
+    @patch("app.chat.rewrite_query")
+    @patch("app.chat.db")
+    async def test_conv_state_passed_to_rewrite_query(
+        self, mock_db, mock_rewrite, mock_memory
+    ):
+        from app.chat import handle_message
+
+        state = {"topic": "bồi thường", "danh_sach": ["1. A", "2. B", "3. C"]}
+
+        mock_db.create_session = MagicMock()
+        mock_db.get_messages = MagicMock(return_value=[])
+        mock_db.get_latest_summary = MagicMock(return_value=None)
+        mock_db.add_message = MagicMock()
+        mock_memory.read = MagicMock(return_value=state)
+
+        mock_rewrite.return_value = {
+            "is_in_scope": False,
+            "standalone_query": "test",
+            "search_queries": [],
+            "filters": {"doc_ids": None, "dieu": None},
+        }
+        mock_db.add_message = MagicMock()
+
+        await handle_message("sess1", "giai thich truong hop 3")
+
+        call_kwargs = mock_rewrite.call_args.kwargs
+        assert call_kwargs.get("conv_state") == state
