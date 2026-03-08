@@ -125,3 +125,49 @@ class TestSystemPromptStructure:
         bound_pos = SYSTEM_BASE.index("<boundaries>")
         hier_pos = SYSTEM_BASE.index("<legal-hierarchy>")
         assert id_pos < bound_pos < hier_pos
+
+
+class TestBackgroundTaskReliability:
+    """H1: Background tasks must log errors and retry once on failure."""
+
+    @pytest.mark.asyncio
+    async def test_safe_background_retries_once_on_failure(self):
+        from app.chat import _safe_background
+
+        call_count = 0
+
+        async def failing_then_succeeds():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("transient error")
+
+        await _safe_background(failing_then_succeeds, label="test_task")
+        assert call_count == 2  # tried once, failed, retried once, succeeded
+
+    @pytest.mark.asyncio
+    async def test_safe_background_logs_permanent_failure(self, caplog):
+        import logging
+        from app.chat import _safe_background
+
+        async def always_fails():
+            raise RuntimeError("permanent error")
+
+        with caplog.at_level(logging.ERROR, logger="app.chat"):
+            # Should not raise
+            await _safe_background(always_fails, label="test_task")
+
+        assert any("permanent" in msg.lower() or "failed" in msg.lower() for msg in caplog.messages)
+
+    @pytest.mark.asyncio
+    async def test_safe_background_succeeds_first_try(self):
+        from app.chat import _safe_background
+
+        call_count = 0
+
+        async def succeeds():
+            nonlocal call_count
+            call_count += 1
+
+        await _safe_background(succeeds, label="test_task")
+        assert call_count == 1

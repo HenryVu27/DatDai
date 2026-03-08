@@ -24,6 +24,19 @@ from app.observability import observe, score_current_trace
 
 logger = logging.getLogger(__name__)
 
+
+async def _safe_background(coro_factory, label: str) -> None:
+    """Run a coroutine factory as a background task. Logs errors and retries once."""
+    try:
+        await coro_factory()
+    except Exception as e:
+        logger.error("Background task '%s' failed: %s — retrying once", label, e)
+        try:
+            await coro_factory()
+        except Exception as e2:
+            logger.error("Background task '%s' failed permanently: %s", label, e2)
+
+
 # -- System prompts (static, XML-tagged) --
 
 SYSTEM_BASE = """<identity>
@@ -432,7 +445,10 @@ async def handle_message(session_id: str, user_message: str) -> dict:
         await asyncio.to_thread(db.add_message, session_id, turn, "user", user_message)
         await asyncio.to_thread(db.add_message, session_id, turn, "assistant", off_topic_response, [])
         if turn == 1:
-            asyncio.create_task(_generate_title(session_id, user_message, off_topic_response))
+            asyncio.create_task(_safe_background(
+                lambda: _generate_title(session_id, user_message, off_topic_response),
+                label="generate_title",
+            ))
         return {"answer": off_topic_response, "sources": [], "session_id": session_id}
 
     standalone_query = rewrite_result["standalone_query"]
@@ -486,7 +502,10 @@ async def handle_message(session_id: str, user_message: str) -> dict:
 
     # Save summary update if provided (background -- not needed for current response)
     if decision["summary_update"]:
-        asyncio.create_task(asyncio.to_thread(db.upsert_summary, session_id, decision["summary_update"], turn))
+        asyncio.create_task(_safe_background(
+            lambda: asyncio.to_thread(db.upsert_summary, session_id, decision["summary_update"], turn),
+            label="upsert_summary",
+        ))
 
     # -- Direct response path --
     if decision["direct_response"]:
@@ -495,7 +514,10 @@ async def handle_message(session_id: str, user_message: str) -> dict:
         await asyncio.to_thread(db.add_message, session_id, turn, "assistant", response, [])
 
         if turn == 1:
-            asyncio.create_task(_generate_title(session_id, user_message, response))
+            asyncio.create_task(_safe_background(
+                lambda: _generate_title(session_id, user_message, response),
+                label="generate_title",
+            ))
 
         return {"answer": response, "sources": [], "session_id": session_id}
 
@@ -541,7 +563,10 @@ async def handle_message(session_id: str, user_message: str) -> dict:
 
     # Auto-generate title for new sessions
     if turn == 1:
-        asyncio.create_task(_generate_title(session_id, user_message, response))
+        asyncio.create_task(_safe_background(
+            lambda: _generate_title(session_id, user_message, response),
+            label="generate_title",
+        ))
 
     # -- Heuristic scores for Langfuse --
     score_current_trace("retrieval_count", float(len(chunks)))
@@ -592,7 +617,10 @@ async def handle_message_stream(session_id: str, user_message: str):
         await asyncio.to_thread(db.add_message, session_id, turn, "user", user_message)
         await asyncio.to_thread(db.add_message, session_id, turn, "assistant", off_topic_response, [])
         if turn == 1:
-            asyncio.create_task(_generate_title(session_id, user_message, off_topic_response))
+            asyncio.create_task(_safe_background(
+                lambda: _generate_title(session_id, user_message, off_topic_response),
+                label="generate_title",
+            ))
         yield ("token", {"text": off_topic_response})
         yield ("done", {"session_id": session_id, "trace_id": _get_trace_id()})
         return
@@ -629,7 +657,10 @@ async def handle_message_stream(session_id: str, user_message: str):
         }
 
     if decision["summary_update"]:
-        asyncio.create_task(asyncio.to_thread(db.upsert_summary, session_id, decision["summary_update"], turn))
+        asyncio.create_task(_safe_background(
+            lambda: asyncio.to_thread(db.upsert_summary, session_id, decision["summary_update"], turn),
+            label="upsert_summary",
+        ))
 
     # -- Direct response path --
     if decision["direct_response"]:
@@ -637,7 +668,10 @@ async def handle_message_stream(session_id: str, user_message: str):
         await asyncio.to_thread(db.add_message, session_id, turn, "user", user_message)
         await asyncio.to_thread(db.add_message, session_id, turn, "assistant", response, [])
         if turn == 1:
-            asyncio.create_task(_generate_title(session_id, user_message, response))
+            asyncio.create_task(_safe_background(
+                lambda: _generate_title(session_id, user_message, response),
+                label="generate_title",
+            ))
         # Yield the full direct response as tokens
         yield ("token", {"text": response})
         yield ("done", {"session_id": session_id, "trace_id": _get_trace_id()})
@@ -686,7 +720,10 @@ async def handle_message_stream(session_id: str, user_message: str):
     ])
 
     if turn == 1:
-        asyncio.create_task(_generate_title(session_id, user_message, response))
+        asyncio.create_task(_safe_background(
+            lambda: _generate_title(session_id, user_message, response),
+            label="generate_title",
+        ))
 
     # Langfuse scores
     score_current_trace("retrieval_count", float(len(chunks)))
