@@ -1,6 +1,6 @@
 """Tests for query_rewriter module."""
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, patch as sync_patch
 
 import pytest
 from app.rag.query_rewriter import (
@@ -178,3 +178,44 @@ class TestRewriterPrompt:
 
     def test_has_pronoun_resolution_instruction(self):
         assert "dai tu" in REWRITER_SYSTEM_PROMPT.lower() or "pronoun" in REWRITER_SYSTEM_PROMPT.lower()
+
+
+class TestMultiQuerySearch:
+    """Test that search_legal_docs handles multiple queries."""
+
+    @pytest.mark.asyncio
+    @patch("app.rag.retriever.llm")
+    @patch("app.rag.retriever._get_store")
+    @patch("app.rag.retriever._get_reranker")
+    async def test_multi_query_merges_results(self, mock_reranker, mock_store_fn, mock_llm):
+        mock_reranker.return_value = None  # no reranker
+
+        store = MagicMock()
+        mock_store_fn.return_value = store
+
+        # Each query returns different chunks
+        store.search_hybrid.side_effect = [
+            [{"chunk_id": "c1", "text": "chunk 1", "score": 0.9}],
+            [{"chunk_id": "c2", "text": "chunk 2", "score": 0.8}],
+            [{"chunk_id": "c1", "text": "chunk 1", "score": 0.85}],  # duplicate
+        ]
+
+        # Mock fetch_full_dieu for _expand_full_dieu
+        store.fetch_full_dieu.return_value = []
+
+        mock_llm.embed = AsyncMock(return_value=[[0.1] * 768, [0.2] * 768, [0.3] * 768])
+
+        from app.rag.retriever import search_legal_docs
+        results = await search_legal_docs(
+            query="main query",
+            search_queries=["variant 1", "variant 2"],
+        )
+
+        # Should have 2 unique chunks (c1 deduplicated)
+        chunk_ids = [c["chunk_id"] for c in results]
+        assert "c1" in chunk_ids
+        assert "c2" in chunk_ids
+        assert len([c for c in chunk_ids if c == "c1"]) == 1
+
+        # Should have called embed once with all 3 queries
+        assert mock_llm.embed.call_count == 1

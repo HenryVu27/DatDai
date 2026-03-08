@@ -42,29 +42,51 @@ async def search_legal_docs(
     doc_ids: list[str] | None = None,
     dieu: str | None = None,
     top_k: int = RAG_TOP_K,
+    search_queries: list[str] | None = None,
 ) -> list[dict]:
     """Hybrid dense+sparse search against Qdrant.
 
-    The orchestrator crafts the query and optional filters.
-    Returns reranked chunks.
+    When search_queries are provided, runs parallel searches for each variant
+    and merges results with deduplication before reranking.
     """
     store = _get_store()
+    reranker = _get_reranker()
+    fetch_k = RAG_RERANK_CANDIDATES if reranker else top_k
 
-    # Embed the query
-    query_embedding = (await llm.embed([query]))[0]
+    # Build list of all queries to search
+    all_queries = [query]
+    if search_queries:
+        all_queries.extend(search_queries)
 
-    # Hybrid search
-    fetch_k = RAG_RERANK_CANDIDATES if _get_reranker() else top_k
-    candidates = store.search_hybrid(
-        query_vector=query_embedding,
-        query_text=query,
-        top_k=fetch_k,
-        doc_ids=doc_ids,
-        dieu=dieu,
-    )
+    # Embed all queries in parallel
+    all_embeddings = await llm.embed(all_queries)
+
+    # Search for each query
+    all_candidates = []
+    for q_text, q_embedding in zip(all_queries, all_embeddings):
+        candidates = store.search_hybrid(
+            query_vector=q_embedding,
+            query_text=q_text,
+            top_k=fetch_k,
+            doc_ids=doc_ids,
+            dieu=dieu,
+        )
+        all_candidates.extend(candidates)
+
+    # Deduplicate by chunk_id, keeping highest score
+    seen = {}
+    for c in all_candidates:
+        cid = c.get("chunk_id")
+        if cid:
+            if cid not in seen or c.get("score", 0) > seen[cid].get("score", 0):
+                seen[cid] = c
+        else:
+            seen[id(c)] = c
+    candidates = list(seen.values())
 
     # Retry without filters if empty
     if not candidates and (doc_ids or dieu):
+        query_embedding = all_embeddings[0]
         candidates = store.search_hybrid(
             query_vector=query_embedding, query_text=query, top_k=fetch_k,
         )
@@ -72,8 +94,7 @@ async def search_legal_docs(
     if not candidates:
         return []
 
-    # Rerank
-    reranker = _get_reranker()
+    # Rerank using the primary query
     if reranker and len(candidates) > top_k:
         try:
             candidates = await reranker.rerank(query, candidates, top_k * 2)
