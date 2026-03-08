@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS summaries (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS conv_state (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id),
+    state      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, turn);
 CREATE INDEX IF NOT EXISTS idx_summaries_session ON summaries(session_id);
 """
@@ -72,6 +78,13 @@ CREATE TABLE IF NOT EXISTS summaries (
     summary TEXT NOT NULL,
     covers_through_turn INTEGER NOT NULL,
     created_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS conv_state (
+    session_id TEXT PRIMARY KEY,
+    state      TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
@@ -336,13 +349,58 @@ def delete_session(session_id: str) -> None:
     p = _ph()
     if _use_pg:
         with db.cursor() as cur:
+            cur.execute(f"DELETE FROM conv_state WHERE session_id = {p}", (session_id,))
             cur.execute(f"DELETE FROM summaries WHERE session_id = {p}", (session_id,))
             cur.execute(f"DELETE FROM messages WHERE session_id = {p}", (session_id,))
             cur.execute(f"DELETE FROM sessions WHERE id = {p}", (session_id,))
         db.commit()
     else:
+        db.execute(f"DELETE FROM conv_state WHERE session_id = {p}", (session_id,))
         db.execute(f"DELETE FROM summaries WHERE session_id = {p}", (session_id,))
         db.execute(f"DELETE FROM messages WHERE session_id = {p}", (session_id,))
         db.execute(f"DELETE FROM sessions WHERE id = {p}", (session_id,))
+        db.commit()
+    _release_db(db)
+
+
+def get_conv_state(session_id: str) -> dict | None:
+    """Return the current conversation state for a session, or None."""
+    db = _get_db()
+    p = _ph()
+    sql = f"SELECT state FROM conv_state WHERE session_id = {p}"
+    if _use_pg:
+        with db.cursor() as cur:
+            cur.execute(sql, (session_id,))
+            row = cur.fetchone()
+        _release_db(db)
+        return json.loads(row[0]) if row else None
+    else:
+        row = db.execute(sql, (session_id,)).fetchone()
+        _release_db(db)
+        return json.loads(row["state"]) if row else None
+
+
+def upsert_conv_state(session_id: str, state: dict, turn: int) -> None:
+    """Upsert the conversation state for a session (one row per session)."""
+    db = _get_db()
+    p = _ph()
+    now = datetime.now().isoformat()
+    state_json = json.dumps(state, ensure_ascii=False)
+    if _use_pg:
+        with db.cursor() as cur:
+            cur.execute(
+                f"""INSERT INTO conv_state (session_id, state, updated_at)
+                    VALUES ({p}, {p}, {p})
+                    ON CONFLICT (session_id) DO UPDATE
+                    SET state = EXCLUDED.state, updated_at = EXCLUDED.updated_at""",
+                (session_id, state_json, now),
+            )
+        db.commit()
+    else:
+        db.execute(
+            f"""INSERT OR REPLACE INTO conv_state (session_id, state, updated_at)
+                VALUES ({p}, {p}, {p})""",
+            (session_id, state_json, now),
+        )
         db.commit()
     _release_db(db)
