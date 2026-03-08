@@ -1,6 +1,12 @@
 """Tests for query_rewriter module."""
+import json
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from app.rag.query_rewriter import extract_filters_regex, VALID_DOC_IDS, validate_filters
+from app.rag.query_rewriter import (
+    extract_filters_regex, VALID_DOC_IDS, validate_filters,
+    rewrite_query, parse_rewrite_response, REWRITER_SYSTEM_PROMPT,
+)
 
 
 class TestExtractFiltersRegex:
@@ -61,3 +67,114 @@ class TestValidateFilters:
     def test_empty_doc_ids_becomes_none(self):
         result = validate_filters({"doc_ids": [], "dieu": None})
         assert result["doc_ids"] is None
+
+
+class TestParseRewriteResponse:
+    """Parse LLM JSON output into validated rewrite result."""
+
+    def test_valid_json(self):
+        raw = json.dumps({
+            "standalone_query": "quyen su dung dat theo Luat Dat Dai 2024",
+            "search_queries": ["quyen nguoi su dung dat", "quyen loi su dung dat"],
+            "filters": {"doc_ids": ["ldd2024"], "dieu": None},
+        })
+        result = parse_rewrite_response(raw, "quyen su dung dat")
+        assert result["standalone_query"] == "quyen su dung dat theo Luat Dat Dai 2024"
+        assert len(result["search_queries"]) == 2
+        assert result["filters"]["doc_ids"] == ["ldd2024"]
+
+    def test_json_in_markdown_fences(self):
+        raw = '```json\n{"standalone_query": "test", "search_queries": ["a"], "filters": {"doc_ids": null, "dieu": null}}\n```'
+        result = parse_rewrite_response(raw, "test")
+        assert result["standalone_query"] == "test"
+
+    def test_invalid_json_falls_back(self):
+        result = parse_rewrite_response("not json at all", "original query")
+        assert result["standalone_query"] == "original query"
+        assert result["search_queries"] == []
+        assert result["filters"]["doc_ids"] is None
+
+    def test_invalid_doc_ids_stripped(self):
+        raw = json.dumps({
+            "standalone_query": "test",
+            "search_queries": [],
+            "filters": {"doc_ids": ["nd999"], "dieu": None},
+        })
+        result = parse_rewrite_response(raw, "test")
+        assert result["filters"]["doc_ids"] is None
+
+    def test_missing_fields_get_defaults(self):
+        raw = json.dumps({"standalone_query": "test"})
+        result = parse_rewrite_response(raw, "test")
+        assert result["search_queries"] == []
+        assert result["filters"] == {"doc_ids": None, "dieu": None}
+
+    def test_empty_standalone_falls_back(self):
+        raw = json.dumps({"standalone_query": "", "search_queries": [], "filters": {}})
+        result = parse_rewrite_response(raw, "original")
+        assert result["standalone_query"] == "original"
+
+
+class TestRewriteQuery:
+    """Integration test for the full rewrite_query function."""
+
+    @pytest.mark.asyncio
+    @patch("app.rag.query_rewriter.llm")
+    async def test_calls_llm_and_parses(self, mock_llm):
+        mock_llm.generate = AsyncMock(return_value=json.dumps({
+            "standalone_query": "giay chung nhan quyen su dung dat (so do) can nhung gi",
+            "search_queries": ["thu tuc cap giay chung nhan quyen su dung dat", "ho so xin cap so do"],
+            "filters": {"doc_ids": ["ldd2024"], "dieu": None},
+        }))
+        result = await rewrite_query("lam so do can gi", summary=None, recent_messages=[])
+        assert "giay chung nhan" in result["standalone_query"]
+        assert len(result["search_queries"]) == 2
+        mock_llm.generate.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("app.rag.query_rewriter.llm")
+    async def test_passes_history_to_llm(self, mock_llm):
+        mock_llm.generate = AsyncMock(return_value=json.dumps({
+            "standalone_query": "thoi han su dung dat o tai do thi theo Luat Dat Dai 2024",
+            "search_queries": ["thoi han giao dat o", "thoi han su dung dat o do thi"],
+            "filters": {"doc_ids": ["ldd2024"], "dieu": None},
+        }))
+        history = [
+            {"role": "user", "content": "Dat o tai do thi co thoi han bao lau?"},
+            {"role": "assistant", "content": "Theo Dieu 172 Luat Dat Dai 2024, dat o la loai dat su dung on dinh lau dai."},
+        ]
+        result = await rewrite_query("Con dat nong nghiep thi sao?", summary=None, recent_messages=history)
+        call_kwargs = mock_llm.generate.call_args
+        prompt_text = call_kwargs.kwargs.get("prompt") or call_kwargs.args[0]
+        assert "do thi" in prompt_text or "nong nghiep" in prompt_text
+
+    @pytest.mark.asyncio
+    @patch("app.rag.query_rewriter.llm")
+    async def test_falls_back_on_llm_error(self, mock_llm):
+        mock_llm.generate = AsyncMock(side_effect=Exception("API error"))
+        result = await rewrite_query("ND 102 dieu 15", summary=None, recent_messages=[])
+        assert result["standalone_query"] == "ND 102 dieu 15"
+        assert result["filters"]["doc_ids"] == ["nd102"]
+        assert result["filters"]["dieu"] == "Dieu 15"
+
+    @pytest.mark.asyncio
+    @patch("app.rag.query_rewriter.llm")
+    async def test_falls_back_on_timeout(self, mock_llm):
+        import asyncio
+        mock_llm.generate = AsyncMock(side_effect=asyncio.TimeoutError())
+        result = await rewrite_query("so do la gi", summary=None, recent_messages=[])
+        assert result["standalone_query"] == "so do la gi"
+
+
+class TestRewriterPrompt:
+    """Verify the system prompt contains required instructions."""
+
+    def test_has_known_doc_ids(self):
+        assert "ldd2024" in REWRITER_SYSTEM_PROMPT
+        assert "nd102" in REWRITER_SYSTEM_PROMPT
+
+    def test_has_json_output_instruction(self):
+        assert "JSON" in REWRITER_SYSTEM_PROMPT
+
+    def test_has_pronoun_resolution_instruction(self):
+        assert "dai tu" in REWRITER_SYSTEM_PROMPT.lower() or "pronoun" in REWRITER_SYSTEM_PROMPT.lower()
