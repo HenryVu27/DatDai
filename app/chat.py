@@ -18,7 +18,7 @@ from app.rag.retriever import (
     search_legal_docs, lookup_amendment, lookup_specific_dieu,
     build_context, extract_sources,
 )
-from app.rag.query_rewriter import extract_filters
+from app.rag.query_rewriter import extract_filters_regex, rewrite_query
 from app.rag.citation_check import verify_citations
 from app.observability import observe, score_current_trace
 
@@ -390,6 +390,7 @@ async def _execute_tools(actions: list[dict]) -> list[dict]:
                     query=query,
                     doc_ids=filters.get("doc_ids"),
                     dieu=filters.get("dieu"),
+                    search_queries=action.get("search_queries"),
                 )
             elif tool == "lookup_amendment":
                 return lookup_amendment(
@@ -443,12 +444,22 @@ async def handle_message(session_id: str, user_message: str) -> dict:
     # Assemble conversation context
     recent_messages, summary = await _assemble_conversation_context(history, session_id)
 
+    # -- Stage 0: Query rewriting --
+    t_rewrite = time.monotonic()
+    rewrite_result = await rewrite_query(user_message, summary, recent_messages)
+    standalone_query = rewrite_result["standalone_query"]
+    search_queries = rewrite_result["search_queries"]
+    rewrite_filters = rewrite_result["filters"]
+    logger.info("[%s] query rewrite: %r -> %r (%d variants, %.1fs)",
+                session_id[:8], user_message[:60], standalone_query[:60],
+                len(search_queries), time.monotonic() - t_rewrite)
+
     # -- Stage 1: Orchestrator --
     t_orch = time.monotonic()
     orch_messages = _trim_for_orchestrator(recent_messages)
     logger.info("orch_msgs=%d gen_msgs=%d", len(orch_messages), len(recent_messages))
     orch_system, orch_history, orch_prompt = _build_orchestrator_prompt(
-        user_message, orch_messages, summary,
+        standalone_query, orch_messages, summary,
     )
 
     orch_raw = await llm.generate(
@@ -469,14 +480,14 @@ async def handle_message(session_id: str, user_message: str) -> dict:
 
     # Guardrail: force retrieval if orchestrator tried to answer a legal question directly
     if _should_force_retrieval(user_message, decision):
-        filters = extract_filters(user_message)
+        filters = rewrite_filters if rewrite_filters.get("doc_ids") or rewrite_filters.get("dieu") else extract_filters_regex(user_message)
         logger.warning(
             "[%s] Guardrail triggered: forcing retrieval for legal question answered directly",
             session_id[:8],
         )
         decision = {
             "reasoning": "Guardrail: legal question requires retrieval",
-            "actions": [{"tool": "search_legal_docs", "query": user_message, "filters": {
+            "actions": [{"tool": "search_legal_docs", "query": standalone_query, "filters": {
                 "doc_ids": filters.get("doc_ids"),
                 "dieu": filters.get("dieu"),
             }}],
@@ -502,6 +513,10 @@ async def handle_message(session_id: str, user_message: str) -> dict:
 
     # -- Stage 2: Execute tools --
     t_tools = time.monotonic()
+    if search_queries:
+        for action in decision["actions"]:
+            if action.get("tool") == "search_legal_docs":
+                action["search_queries"] = search_queries
     chunks = await _execute_tools(decision["actions"])
     logger.info("[%s] tools returned %d chunks (%.1fs)", session_id[:8], len(chunks), time.monotonic() - t_tools)
 
@@ -577,12 +592,18 @@ async def handle_message_stream(session_id: str, user_message: str):
     turn = max((m["turn"] for m in history), default=0) + 1
     recent_messages, summary = await _assemble_conversation_context(history, session_id)
 
-    # -- Stage 1: Orchestrator --
-    yield ("status", {"text": random.choice(_STATUS_READING), "step": "orchestrator"})
+    yield ("status", {"text": "Dang phan tich cau hoi...", "step": "orchestrator"})
 
+    # -- Stage 0: Query rewriting --
+    rewrite_result = await rewrite_query(user_message, summary, recent_messages)
+    standalone_query = rewrite_result["standalone_query"]
+    search_queries = rewrite_result["search_queries"]
+    rewrite_filters = rewrite_result["filters"]
+
+    # -- Stage 1: Orchestrator --
     orch_messages = _trim_for_orchestrator(recent_messages)
     orch_system, orch_history, orch_prompt = _build_orchestrator_prompt(
-        user_message, orch_messages, summary,
+        standalone_query, orch_messages, summary,
     )
     orch_raw = await llm.generate(
         prompt=orch_prompt, system=orch_system, history=orch_history,
@@ -595,10 +616,10 @@ async def handle_message_stream(session_id: str, user_message: str):
 
     # Guardrail
     if _should_force_retrieval(user_message, decision):
-        filters = extract_filters(user_message)
+        filters = rewrite_filters if rewrite_filters.get("doc_ids") or rewrite_filters.get("dieu") else extract_filters_regex(user_message)
         decision = {
             "reasoning": "Guardrail: legal question requires retrieval",
-            "actions": [{"tool": "search_legal_docs", "query": user_message, "filters": {
+            "actions": [{"tool": "search_legal_docs", "query": standalone_query, "filters": {
                 "doc_ids": filters.get("doc_ids"), "dieu": filters.get("dieu"),
             }}],
             "complexity": decision.get("complexity", "simple"),
@@ -623,6 +644,10 @@ async def handle_message_stream(session_id: str, user_message: str):
 
     # -- Stage 2: Execute tools --
     yield ("status", {"text": random.choice(_STATUS_SEARCHING), "step": "retrieval"})
+    if search_queries:
+        for action in decision["actions"]:
+            if action.get("tool") == "search_legal_docs":
+                action["search_queries"] = search_queries
     chunks = await _execute_tools(decision["actions"])
     logger.info("[%s] tools returned %d chunks", session_id[:8], len(chunks))
 
