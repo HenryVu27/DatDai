@@ -114,11 +114,15 @@ def _build_rewriter_prompt(
     user_message: str,
     summary: str | None,
     recent_messages: list[dict],
+    conv_state: dict | None = None,
 ) -> str:
     """Build the user-facing prompt for the rewriter."""
     parts = []
     if summary:
         parts.append(f"<tom-tat-hoi-thoai>\n{summary}\n</tom-tat-hoi-thoai>")
+    if conv_state:
+        state_text = json.dumps(conv_state, ensure_ascii=False, indent=2)
+        parts.append(f"<bo-nho>\n{state_text}\n</bo-nho>")
     if recent_messages:
         history_lines = []
         windowed = recent_messages[-10:]
@@ -195,11 +199,12 @@ async def rewrite_query(
     user_message: str,
     summary: str | None,
     recent_messages: list[dict],
+    conv_state: dict | None = None,
 ) -> dict:
     """Rewrite a user query for better retrieval. Falls back to regex on failure."""
     import asyncio
 
-    prompt = _build_rewriter_prompt(user_message, summary, recent_messages)
+    prompt = _build_rewriter_prompt(user_message, summary, recent_messages, conv_state)
 
     try:
         raw = await asyncio.wait_for(

@@ -226,6 +226,57 @@ class TestRewriterContextWindow:
         assert any(kw in lowered for kw in ["so thu tu", "ordinal", "truong hop", "muc"])
 
 
+class TestRewriterConvState:
+    """Verify conv_state is injected into rewriter prompt."""
+
+    def test_conv_state_injected_into_prompt(self):
+        from app.rag.query_rewriter import _build_rewriter_prompt
+
+        state = {
+            "chu_de": "bồi thường",
+            "danh_sach": ["1. Trường hợp A", "2. B", "3. Chi phí đầu tư"],
+        }
+        prompt = _build_rewriter_prompt(
+            "giai thich truong hop 3",
+            summary=None,
+            recent_messages=[],
+            conv_state=state,
+        )
+        assert "bo-nho" in prompt or "Chi phí đầu tư" in prompt
+
+    def test_conv_state_none_does_not_error(self):
+        from app.rag.query_rewriter import _build_rewriter_prompt
+
+        prompt = _build_rewriter_prompt(
+            "some query",
+            summary=None,
+            recent_messages=[],
+            conv_state=None,
+        )
+        assert "some query" in prompt
+
+    @pytest.mark.asyncio
+    @patch("app.rag.query_rewriter.llm")
+    async def test_rewrite_query_accepts_conv_state(self, mock_llm):
+        from app.rag.query_rewriter import rewrite_query
+        import json
+
+        mock_llm.generate = AsyncMock(return_value=json.dumps({
+            "standalone_query": "Chi phí đầu tư vào đất còn lại được bồi thường",
+            "search_queries": ["chi phi dau tu con lai boi thuong"],
+            "filters": {"doc_ids": None, "dieu": None},
+        }))
+
+        state = {"danh_sach": ["1. A", "2. B", "3. Chi phí đầu tư"]}
+        result = await rewrite_query(
+            "giai thich truong hop 3",
+            summary=None,
+            recent_messages=[],
+            conv_state=state,
+        )
+        assert "Chi phí" in result["standalone_query"]
+
+
 class TestMultiQuerySearch:
     """Test that search_legal_docs handles multiple queries."""
 
