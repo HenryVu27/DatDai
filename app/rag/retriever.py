@@ -5,7 +5,7 @@ Results are merged and reranked in the orchestrator pipeline.
 """
 import logging
 from app import llm
-from app.config import RAG_RERANK_CANDIDATES, RAG_RELEVANCE_THRESHOLD, RAG_USE_RERANKER, RAG_TOP_K
+from app.config import RAG_RERANK_CANDIDATES, RAG_RELEVANCE_THRESHOLD, RAG_USE_RERANKER, RAG_TOP_K, RAG_MAX_EXPANSION_CHUNKS
 from app.rag.knowledge_store import KnowledgeStore
 from app.rag.reranker import CrossEncoderReranker
 from app.rag.cross_ref import AMENDED_BY
@@ -86,6 +86,11 @@ async def search_legal_docs(
 
     # Retry without filters if empty
     if not candidates and (doc_ids or dieu):
+        logger.warning(
+            "Filter produced 0 results (doc_ids=%s, dieu=%s) — retrying without filters. "
+            "Results may be from a different document.",
+            doc_ids, dieu,
+        )
         query_embedding = all_embeddings[0]
         candidates = store.search_hybrid(
             query_vector=query_embedding, query_text=query, top_k=fetch_k,
@@ -103,7 +108,17 @@ async def search_legal_docs(
 
     # Relevance threshold
     if reranker:
-        candidates = [c for c in candidates if c["score"] >= RAG_RELEVANCE_THRESHOLD]
+        above = [c for c in candidates if c["score"] >= RAG_RELEVANCE_THRESHOLD]
+        if above:
+            candidates = above
+        else:
+            # All below threshold — fall back to top-k by raw vector score, no threshold
+            logger.warning(
+                "All %d reranked candidates scored below threshold %.2f — "
+                "falling back to top-%d by vector score",
+                len(candidates), RAG_RELEVANCE_THRESHOLD, top_k,
+            )
+            candidates = sorted(candidates, key=lambda c: c.get("score", 0), reverse=True)
 
     # Trim and expand full Dieu for top results
     chunks = candidates[:top_k]
@@ -163,17 +178,21 @@ def lookup_specific_dieu(doc_id: str, dieu: str) -> list[dict]:
 
 
 def _expand_full_dieu(chunks: list[dict], store: KnowledgeStore) -> list[dict]:
-    """For top-scoring chunks, fetch all sibling chunks from same Dieu."""
+    """For top-scoring chunks, fetch sibling chunks from same Dieu. Capped at RAG_MAX_EXPANSION_CHUNKS."""
     seen_ids = {c.get("chunk_id") for c in chunks}
     expansion = []
 
     for chunk in chunks[:3]:
+        if len(expansion) >= RAG_MAX_EXPANSION_CHUNKS:
+            break
         doc_id = chunk.get("doc_id", "")
         dieu = chunk.get("dieu", "")
         if not doc_id or not dieu:
             continue
         siblings = store.fetch_full_dieu(doc_id, dieu)
         for sib in siblings:
+            if len(expansion) >= RAG_MAX_EXPANSION_CHUNKS:
+                break
             cid = sib.get("chunk_id")
             if cid and cid not in seen_ids:
                 seen_ids.add(cid)

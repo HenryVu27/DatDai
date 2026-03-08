@@ -85,7 +85,7 @@ Chọn tool phù hợp:
 QUY TẮC BẮT BUỘC:
 - BẤT KỲ câu hỏi liên quan đến pháp luật, điều khoản, thủ tục, quyền, nghĩa vụ, đất đai -> PHẢI gọi ít nhất một tool
 - KHÔNG BAO GIỜ tự trả lời câu hỏi pháp luật từ kiến thức của bạn - LUÔN tra cứu trước
-- direct_response CHỈ dùng cho: chào hỏi, cảm ơn, tạm biệt, nói chuyện xã giao, hoặc hỏi lại để làm rõ câu hỏi mơ hồ
+- direct_response CHỈ dùng cho: chào hỏi, cảm ơn, tạm biệt, nói chuyện xã giao, hỏi về khả năng/phạm vi của chatbot, hoặc hỏi lại để làm rõ câu hỏi mơ hồ
 - Khi người dùng hỏi tiếp về nội dung vừa trả lời (làm rõ, giải thích thêm) -> vẫn PHẢI gọi tool để đảm bảo chính xác
 - Khi không chắc có cần tra cứu không -> GỌI TOOL (an toàn hơn là tự trả lời sai)
 </retrieval-policy>"""
@@ -105,7 +105,7 @@ Trả về CHÍNH XÁC một JSON object (không markdown, không giải thích)
 Quy tắc:
 - actions và direct_response không đồng thời có giá trị. Chọn một trong hai.
 - Câu hỏi pháp luật -> actions (KHÔNG ĐƯỢC dùng direct_response)
-- Chào hỏi, cảm ơn, xã giao, hỏi lại -> direct_response (KHÔNG CẦN actions)
+- Chào hỏi, cảm ơn, xã giao, hỏi về khả năng của chatbot, hỏi lại -> direct_response (KHÔNG CẦN actions)
 - complexity: "complex" khi so sánh nhiều văn bản, phân tích tình huống phức tạp, câu hỏi liên quan đến sửa đổi. "simple" cho còn lại
 - summary_update: chỉ khi cuộc hội thoại đã có 4+ lượt trao đổi. Tóm tắt PHẢI bao gồm summary trước đó và bổ sung nội dung mới
 - Khi viết query cho search_legal_docs: viết câu truy vấn đầy đủ ngữ cảnh, không dùng đại từ (nó, đó, này), không viết tắt
@@ -120,40 +120,21 @@ OUTPUT: {"reasoning": "Câu hỏi chung về quyền sử dụng đất, cần s
 
 INPUT: "NĐ 49 sửa đổi gì của NĐ 102?"
 OUTPUT: {"reasoning": "Hỏi về sửa đổi giữa 2 NĐ, cần lookup_amendment và search", "actions": [{"tool": "lookup_amendment", "target_doc": "nd102", "source_doc": "nd49"}, {"tool": "search_legal_docs", "query": "Nghị định 49/2026 sửa đổi bổ sung Nghị định 102/2024 chi tiết thi hành Luật Đất Đai", "filters": {"doc_ids": ["nd49"]}}], "complexity": "complex", "summary_update": null, "direct_response": null}
+
+INPUT: "Bạn có thể làm gì?" hoặc "Bạn hỗ trợ những gì?"
+OUTPUT: {"reasoning": "Hỏi về khả năng của chatbot, trả lời trực tiếp không cần tra cứu", "actions": [], "complexity": "simple", "summary_update": null, "direct_response": "Mình có thể giúp bạn tra cứu và giải thích các quy định trong Luật Đất Đai 2024 cùng các nghị định hướng dẫn (NĐ 71, 88, 102, 103, 151, 226, 49, 50...). Bạn có thể hỏi về thủ tục, quyền, nghĩa vụ, bồi thường, giá đất, hay bất kỳ điều khoản cụ thể nào. Bạn muốn hỏi về vấn đề gì?"}
 </examples>"""
 
 
 GENERATOR_INSTRUCTIONS = """
-<output-format>
-Khi trả lời dựa trên tài liệu pháp luật:
-- Trích dẫn theo format: "Theo [khoản X] Điều Y [Tên văn bản]..." hoặc "Căn cứ Điều Y [Tên văn bản]..."
-- Khi nhiều văn bản cùng điều chỉnh một vấn đề, trình bày theo thứ tự: luật gốc → nghị định hướng dẫn → nghị định sửa đổi mới nhất
-- Dùng bullet points khi liệt kê nhiều điều kiện, quyền, nghĩa vụ
-- Kết thúc bằng lưu ý về văn bản áp dụng nếu có sửa đổi gần đây
-</output-format>
-
-<examples>
-TÌNH HUỐNG 1 — Câu hỏi đơn giản, một văn bản:
-Câu hỏi: "Người sử dụng đất có những quyền gì?"
-Trả lời mẫu:
-Theo **Điều 27 Luật Đất Đai 2024**, người sử dụng đất có các quyền chung sau:
-- Được cấp Giấy chứng nhận quyền sử dụng đất
-- Hưởng thành quả lao động, kết quả đầu tư trên đất
-- Được Nhà nước bảo hộ khi quyền sử dụng đất bị xâm phạm
-- Khiếu nại, tố cáo, khởi kiện về những hành vi vi phạm quyền sử dụng đất hợp pháp của mình
-- Chuyển đổi, chuyển nhượng, cho thuê, tặng cho, thừa kế, thế chấp quyền sử dụng đất (tùy loại đất và điều kiện cụ thể)
-
-TÌNH HUỐNG 2 — Câu hỏi liên quan đến sửa đổi giữa các nghị định:
-Câu hỏi: "Thủ tục thu hồi đất theo NĐ 49 thay đổi gì so với NĐ 88?"
-Trả lời mẫu:
-**Nghị định 49/2026/NĐ-CP** sửa đổi, bổ sung một số điều của **Nghị định 88/2024/NĐ-CP** về bồi thường, hỗ trợ, tái định cư khi Nhà nước thu hồi đất.
-
-Theo **khoản 2 Điều 5 Nghị định 49/2026** (sửa đổi Điều 10 Nghị định 88/2024), các thay đổi chính gồm:
-- [nội dung sửa đổi từ tài liệu]
-- [nội dung sửa đổi từ tài liệu]
-
-**Lưu ý:** Kể từ ngày Nghị định 49/2026 có hiệu lực, các quy định tại Nghị định 88/2024 bị sửa đổi sẽ không còn áp dụng. Cần đối chiếu cả hai văn bản để xác định quy định hiện hành.
-</examples>"""
+<response-style>
+Trả lời tự nhiên, phù hợp với từng câu hỏi cụ thể:
+- Câu hỏi đơn giản về một điều/khoản cụ thể → trả lời ngắn gọn bằng văn xuôi, không cần cấu trúc phức tạp
+- Câu hỏi hỏi liệt kê nhiều mục (từ 4 mục trở lên) → dùng bullet points để dễ đọc
+- Câu hỏi so sánh, phân tích, nhiều văn bản liên quan → có thể dùng cấu trúc rõ ràng
+- Trích dẫn điều khoản khi cần thiết, không nhất thiết phải trích dẫn mọi điều tìm được
+- Chỉ thêm cảnh báo về sửa đổi khi có xung đột thực sự giữa văn bản cũ và mới
+</response-style>"""
 
 
 _STATUS_READING = [
@@ -226,13 +207,14 @@ async def _assemble_conversation_context(history: list[dict], session_id: str) -
     if len(msgs) > max_msgs:
         msgs = msgs[-max_msgs:]
 
-    # Trim by character budget
+    # Trim by character budget (forward pass — include messages until budget would be exceeded)
     total_chars = 0
     trimmed = []
     for msg in reversed(msgs):
-        total_chars += len(msg["content"])
-        if total_chars > CONTEXT_MAX_CHARS:
+        msg_len = len(msg["content"])
+        if total_chars + msg_len > CONTEXT_MAX_CHARS:
             break
+        total_chars += msg_len
         trimmed.insert(0, msg)
 
     # Ensure we don't start with an assistant message (orphaned)
@@ -249,9 +231,10 @@ def _trim_for_orchestrator(msgs: list[dict]) -> list[dict]:
     total = 0
     result = []
     for msg in reversed(trimmed):
-        total += len(msg["content"])
-        if total > ORCH_MAX_CHARS:
+        msg_len = len(msg["content"])
+        if total + msg_len > ORCH_MAX_CHARS:
             break
+        total += msg_len
         result.insert(0, msg)
     if result and result[0]["role"] == "assistant":
         result = result[1:]
@@ -313,13 +296,7 @@ def _build_generator_prompt(
 {user_message}
 </user-question>
 
-Hãy trả lời câu hỏi dựa trên tài liệu tham khảo ở trên.
-Yêu cầu:
-- Trích dẫn cụ thể số điều, khoản, điểm và tên văn bản (vd: "Theo Điều 79 Luật Đất Đai 2024...")
-- Nếu có nhiều văn bản liên quan, giải thích mối quan hệ (luật gốc -> nghị định hướng dẫn -> nghị định sửa đổi)
-- Nếu thông tin trong tài liệu không đủ để trả lời đầy đủ, nói rõ phần nào chưa tìm thấy
-- Trả lời có cấu trúc, dùng bullet points khi liệt kê nhiều mục
-- Không tự thêm thông tin ngoài tài liệu được cung cấp"""
+Hãy trả lời câu hỏi dựa trên tài liệu tham khảo ở trên. Trích dẫn điều khoản khi cần thiết. Không tự thêm thông tin ngoài tài liệu."""
     else:
         prompt = f"""<user-question>
 {user_message}
@@ -368,10 +345,10 @@ def _parse_orchestrator_response(text: str, user_message: str = "") -> dict:
 
     # Ensure required keys with defaults
     result.setdefault("reasoning", "")
-    result.setdefault("actions", [])
     result.setdefault("complexity", "simple")
     result.setdefault("summary_update", None)
     result.setdefault("direct_response", None)
+    result["actions"] = result.get("actions") or []  # guard against explicit null from LLM
     return result
 
 
@@ -447,6 +424,17 @@ async def handle_message(session_id: str, user_message: str) -> dict:
     # -- Stage 0: Query rewriting --
     t_rewrite = time.monotonic()
     rewrite_result = await rewrite_query(user_message, summary, recent_messages)
+
+    # Off-topic short-circuit — skip orchestrator entirely
+    if not rewrite_result.get("is_in_scope", True):
+        off_topic_response = "Tôi chỉ hỗ trợ tra cứu pháp luật đất đai Việt Nam (Luật Đất Đai 2024 và các nghị định hướng dẫn thi hành). Bạn có câu hỏi nào về đất đai không?"
+        logger.info("[%s] turn=%d off-topic query, short-circuiting", session_id[:8], turn)
+        await asyncio.to_thread(db.add_message, session_id, turn, "user", user_message)
+        await asyncio.to_thread(db.add_message, session_id, turn, "assistant", off_topic_response, [])
+        if turn == 1:
+            asyncio.create_task(_generate_title(session_id, user_message, off_topic_response))
+        return {"answer": off_topic_response, "sources": [], "session_id": session_id}
+
     standalone_query = rewrite_result["standalone_query"]
     search_queries = rewrite_result["search_queries"]
     rewrite_filters = rewrite_result["filters"]
@@ -474,7 +462,7 @@ async def handle_message(session_id: str, user_message: str) -> dict:
     logger.info(
         "[%s] turn=%d orchestrator: complexity=%s actions=%d direct=%s (%.1fs)",
         session_id[:8], turn, decision["complexity"],
-        len(decision["actions"]), bool(decision["direct_response"]),
+        len(decision["actions"] or []), bool(decision["direct_response"]),
         time.monotonic() - t_orch,
     )
 
@@ -596,6 +584,19 @@ async def handle_message_stream(session_id: str, user_message: str):
 
     # -- Stage 0: Query rewriting --
     rewrite_result = await rewrite_query(user_message, summary, recent_messages)
+
+    # Off-topic short-circuit — skip orchestrator entirely
+    if not rewrite_result.get("is_in_scope", True):
+        off_topic_response = "Tôi chỉ hỗ trợ tra cứu pháp luật đất đai Việt Nam (Luật Đất Đai 2024 và các nghị định hướng dẫn thi hành). Bạn có câu hỏi nào về đất đai không?"
+        logger.info("[%s] turn=%d off-topic query, short-circuiting", session_id[:8], turn)
+        await asyncio.to_thread(db.add_message, session_id, turn, "user", user_message)
+        await asyncio.to_thread(db.add_message, session_id, turn, "assistant", off_topic_response, [])
+        if turn == 1:
+            asyncio.create_task(_generate_title(session_id, user_message, off_topic_response))
+        yield ("token", {"text": off_topic_response})
+        yield ("done", {"session_id": session_id, "trace_id": _get_trace_id()})
+        return
+
     standalone_query = rewrite_result["standalone_query"]
     search_queries = rewrite_result["search_queries"]
     rewrite_filters = rewrite_result["filters"]
@@ -612,7 +613,7 @@ async def handle_message_stream(session_id: str, user_message: str):
     decision = _parse_orchestrator_response(orch_raw, user_message)
     logger.info("[%s] turn=%d orchestrator: complexity=%s actions=%d direct=%s",
                 session_id[:8], turn, decision["complexity"],
-                len(decision["actions"]), bool(decision["direct_response"]))
+                len(decision["actions"] or []), bool(decision["direct_response"]))
 
     # Guardrail
     if _should_force_retrieval(user_message, decision):

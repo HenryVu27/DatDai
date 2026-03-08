@@ -46,6 +46,7 @@ RAG_TOP_K = 8
 RAG_RERANK_CANDIDATES = 20
 RAG_RELEVANCE_THRESHOLD = 0.3
 RAG_USE_RERANKER = True
+RAG_MAX_EXPANSION_CHUNKS = 12   # Max sibling chunks added by _expand_full_dieu
 
 # Context management
 CONTEXT_MAX_TURN_GROUPS = 6

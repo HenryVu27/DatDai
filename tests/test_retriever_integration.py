@@ -95,3 +95,123 @@ class TestQueryRewriterUnit:
 
         filters = extract_filters("Nghị quyết 254 nói gì")
         assert "nq254" in filters["doc_ids"]
+
+
+class TestRerankerFallback:
+    """C1: Reranker threshold eliminating all results must fall back to vector score."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.anyio
+    @pytest.mark.asyncio
+    async def test_falls_back_when_all_below_threshold(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        with patch("app.rag.retriever.llm") as mock_llm, \
+             patch("app.rag.retriever._get_store") as mock_store_fn, \
+             patch("app.rag.retriever._get_reranker") as mock_reranker_fn:
+            from app.rag.retriever import search_legal_docs
+
+            reranker = MagicMock()
+            # All candidates score below 0.3 threshold
+            reranker.rerank = AsyncMock(return_value=[
+                {"chunk_id": "c1", "text": "text 1", "score": 0.1},
+                {"chunk_id": "c2", "text": "text 2", "score": 0.2},
+            ])
+            mock_reranker_fn.return_value = reranker
+
+            store = MagicMock()
+            store.search_hybrid.return_value = [
+                {"chunk_id": "c1", "text": "text 1", "score": 0.9},
+                {"chunk_id": "c2", "text": "text 2", "score": 0.8},
+            ]
+            store.fetch_full_dieu.return_value = []
+            mock_store_fn.return_value = store
+
+            mock_llm.embed = AsyncMock(return_value=[[0.1] * 768])
+
+            results = await search_legal_docs("some query")
+
+            # Must return results even though all were below threshold
+            assert len(results) > 0
+
+    @pytest.mark.asyncio
+    async def test_normal_results_above_threshold_returned(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        with patch("app.rag.retriever.llm") as mock_llm, \
+             patch("app.rag.retriever._get_store") as mock_store_fn, \
+             patch("app.rag.retriever._get_reranker") as mock_reranker_fn:
+            from app.rag.retriever import search_legal_docs
+
+            reranker = MagicMock()
+            reranker.rerank = AsyncMock(return_value=[
+                {"chunk_id": "c1", "text": "text 1", "score": 0.9},
+            ])
+            mock_reranker_fn.return_value = reranker
+
+            store = MagicMock()
+            store.search_hybrid.return_value = [{"chunk_id": "c1", "text": "text 1", "score": 0.9}]
+            store.fetch_full_dieu.return_value = []
+            mock_store_fn.return_value = store
+
+            mock_llm.embed = AsyncMock(return_value=[[0.1] * 768])
+
+            results = await search_legal_docs("some query")
+            assert results[0]["score"] == 0.9
+
+
+class TestFilterRetryLogging:
+    """C4: Filter-retry without filters must log a warning."""
+
+    @pytest.mark.asyncio
+    async def test_logs_warning_on_filter_retry(self, caplog):
+        import logging
+        from unittest.mock import AsyncMock, MagicMock, patch
+        with patch("app.rag.retriever.llm") as mock_llm, \
+             patch("app.rag.retriever._get_store") as mock_store_fn, \
+             patch("app.rag.retriever._get_reranker") as mock_reranker_fn:
+            from app.rag.retriever import search_legal_docs
+
+            mock_reranker_fn.return_value = None
+
+            store = MagicMock()
+            # First call (with filter) returns empty; second call (no filter) returns results
+            store.search_hybrid.side_effect = [
+                [],
+                [{"chunk_id": "c1", "text": "text", "score": 0.9}],
+            ]
+            store.fetch_full_dieu.return_value = []
+            mock_store_fn.return_value = store
+
+            mock_llm.embed = AsyncMock(return_value=[[0.1] * 768])
+
+            with caplog.at_level(logging.WARNING, logger="app.rag.retriever"):
+                await search_legal_docs("query", doc_ids=["nd102"])
+
+            assert any("filter" in msg.lower() or "retry" in msg.lower() for msg in caplog.messages)
+
+
+class TestDieuExpansionCap:
+    """M4: Dieu expansion must not exceed MAX_EXPANSION_CHUNKS total."""
+
+    def test_expansion_capped(self):
+        from unittest.mock import MagicMock, patch
+        with patch("app.rag.retriever._get_store") as mock_store_fn:
+            from app.rag.retriever import _expand_full_dieu
+
+            store = MagicMock()
+            # Each Dieu has 20 sibling chunks
+            store.fetch_full_dieu.return_value = [
+                {"chunk_id": f"sib_{i}", "text": f"sibling {i}"} for i in range(20)
+            ]
+            mock_store_fn.return_value = store
+
+            base_chunks = [
+                {"chunk_id": "c1", "doc_id": "ldd2024", "dieu": "Dieu 79", "score": 0.9},
+                {"chunk_id": "c2", "doc_id": "ldd2024", "dieu": "Dieu 80", "score": 0.8},
+                {"chunk_id": "c3", "doc_id": "ldd2024", "dieu": "Dieu 81", "score": 0.7},
+            ]
+
+            result = _expand_full_dieu(base_chunks, store)
+
+            # Must not exceed base + MAX_EXPANSION_CHUNKS
+            from app.config import RAG_MAX_EXPANSION_CHUNKS
+            assert len(result) <= len(base_chunks) + RAG_MAX_EXPANSION_CHUNKS
