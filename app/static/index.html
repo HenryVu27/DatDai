@@ -1091,6 +1091,7 @@ async function handleSubmit(e) {
   let fullText = '';
   let streamTraceId = null;
   let statusCleared = false;
+  let idleTimer = null;
 
   try {
     currentController = new AbortController();
@@ -1117,7 +1118,6 @@ async function handleSubmit(e) {
     let buffer = '';
 
     // Idle timeout: abort if no SSE data arrives for 60s (e.g., Pro model hangs mid-generation)
-    let idleTimer = null;
     const IDLE_TIMEOUT_MS = 60000;
     function resetIdleTimer() {
       if (idleTimer) clearTimeout(idleTimer);
