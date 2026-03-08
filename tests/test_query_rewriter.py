@@ -1,6 +1,6 @@
 """Tests for query_rewriter module."""
 import json
-from unittest.mock import AsyncMock, MagicMock, patch, patch as sync_patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from app.rag.query_rewriter import (
@@ -22,7 +22,7 @@ class TestExtractFiltersRegex:
 
     def test_extracts_dieu(self):
         result = extract_filters_regex("dieu 79 luat dat dai")
-        assert result["dieu"] == "Dieu 79"
+        assert result["dieu"] == "Điều 79"
 
     def test_no_match(self):
         result = extract_filters_regex("xin chao")
@@ -155,7 +155,7 @@ class TestRewriteQuery:
         result = await rewrite_query("ND 102 dieu 15", summary=None, recent_messages=[])
         assert result["standalone_query"] == "ND 102 dieu 15"
         assert result["filters"]["doc_ids"] == ["nd102"]
-        assert result["filters"]["dieu"] == "Dieu 15"
+        assert result["filters"]["dieu"] == "Điều 15"
 
     @pytest.mark.asyncio
     @patch("app.rag.query_rewriter.llm")

@@ -31,7 +31,7 @@ DOC_PATTERNS = {
 }
 
 DIEU_RE = re.compile(r"(?:điều|dieu|đ\.?)\s*(\d+[a-z]?)", re.IGNORECASE)
-DIEU_VALIDATE_RE = re.compile(r"^Dieu \d+[a-z]?$", re.IGNORECASE)
+DIEU_VALIDATE_RE = re.compile(r"^(?:Điều|Dieu) \d+[a-z]?$", re.IGNORECASE)
 
 
 def extract_filters_regex(query: str) -> dict:
@@ -44,11 +44,11 @@ def extract_filters_regex(query: str) -> dict:
     dieu = None
     m = DIEU_RE.search(query_lower)
     if m:
-        dieu = f"Dieu {m.group(1)}"
+        dieu = f"Điều {m.group(1)}"
     return {"doc_ids": list(set(doc_ids)) or None, "dieu": dieu}
 
 
-# Backward-compatible alias (will be removed in Task 4)
+# Backward-compatible alias
 extract_filters = extract_filters_regex
 
 
