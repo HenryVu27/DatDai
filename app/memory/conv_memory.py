@@ -59,7 +59,7 @@ async def extract_state(response: str, prev_state: dict | None) -> dict | None:
             system=_EXTRACTOR_SYSTEM,
             model="utility",
             temperature=0.0,
-            max_tokens=400,
+            max_tokens=800,
         )
         raw = raw.strip()
         if raw.startswith("```"):

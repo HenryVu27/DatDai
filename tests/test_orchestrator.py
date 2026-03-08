@@ -100,6 +100,19 @@ class TestLegalKeywordGuardrail:
         decision = {"direct_response": None, "actions": []}
         assert not _should_force_retrieval("Dieu 79", decision)
 
+    def test_should_force_when_standalone_query_has_legal_keywords(self):
+        # Original message has no legal keywords, but rewritten standalone query does
+        decision = {"direct_response": "Day la cau tra loi", "actions": []}
+        assert _should_force_retrieval(
+            "ban co the giai thich ki hon ve van de 3 duoc khong",
+            decision,
+            standalone_query="nghia vu tai chinh ve dat dai cua nguoi su dung dat",
+        )
+
+    def test_should_not_force_when_neither_has_legal_keywords(self):
+        decision = {"direct_response": "Xin chao!", "actions": []}
+        assert not _should_force_retrieval("ban lam duoc gi", decision, standalone_query="co the giup gi cho ban")
+
 
 class TestSystemPromptStructure:
     def test_base_has_xml_tags(self):

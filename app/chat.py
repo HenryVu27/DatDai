@@ -193,13 +193,13 @@ LEGAL_KEYWORDS = re.compile(
 )
 
 
-def _should_force_retrieval(user_message: str, decision: dict) -> bool:
+def _should_force_retrieval(user_message: str, decision: dict, standalone_query: str = "") -> bool:
     """Check if a direct_response should be overridden with retrieval."""
     if not decision.get("direct_response"):
         return False
     if decision.get("actions"):
         return False
-    return bool(LEGAL_KEYWORDS.search(user_message))
+    return bool(LEGAL_KEYWORDS.search(user_message) or LEGAL_KEYWORDS.search(standalone_query))
 
 
 # -- Context assembly --
@@ -485,7 +485,7 @@ async def handle_message(session_id: str, user_message: str) -> dict:
     )
 
     # Guardrail: force retrieval if orchestrator tried to answer a legal question directly
-    if _should_force_retrieval(user_message, decision):
+    if _should_force_retrieval(user_message, decision, standalone_query):
         filters = rewrite_filters if rewrite_filters.get("doc_ids") or rewrite_filters.get("dieu") else extract_filters_regex(user_message)
         logger.warning(
             "[%s] Guardrail triggered: forcing retrieval for legal question answered directly",
@@ -653,7 +653,7 @@ async def handle_message_stream(session_id: str, user_message: str):
                 len(decision["actions"] or []), bool(decision["direct_response"]))
 
     # Guardrail
-    if _should_force_retrieval(user_message, decision):
+    if _should_force_retrieval(user_message, decision, standalone_query):
         filters = rewrite_filters if rewrite_filters.get("doc_ids") or rewrite_filters.get("dieu") else extract_filters_regex(user_message)
         decision = {
             "reasoning": "Guardrail: legal question requires retrieval",
