@@ -548,6 +548,8 @@ body { display: flex; }
   border: 0;
 }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 </head>
 <body>
 
@@ -881,45 +883,22 @@ function removeTyping() {
   if (el) el.remove();
 }
 
+marked.use({ gfm: true, breaks: true });
+
+function normalizeMarkdown(text) {
+  // 1. Inline list items: ". * Item" or ": * Item" → newline + "* Item"
+  //    Handles model output like "bao gồm: * Chi phí A. * Chi phí B."
+  text = text.replace(/([.;:]) \* (?=\S)/g, '$1\n* ');
+
+  // 2. Ensure a blank line before list blocks so marked recognises them.
+  //    Without this, "breaks:true" treats "* item" after a paragraph as <br>* item.
+  text = text.replace(/([^\n])\n([*-] )/g, '$1\n\n$2');
+
+  return text;
+}
+
 function formatContent(text) {
-  let h = esc(text);
-  // Bold
-  h = h.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  // Headers (h1-h6)
-  h = h.replace(/^(#{1,6}) (.+)$/gm, (match, hashes, text) => {
-    const level = hashes.length;
-    const tag = 'h' + level;
-    return `<${tag}>${text}</${tag}>`;
-  });
-  // Lists
-  h = h.replace(/^- (.+)$/gm, '<li>$1</li>');
-  h = h.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
-  // Tables: matches header row | sep row | data rows...
-  h = h.replace(
-    /^(\|.+\|[ \t]*)(\n\|[-:| \t]+\|[ \t]*)(\n\|.+\|[ \t]*)+/gm,
-    (match) => {
-      const lines = match.trim().split('\n');
-      if (lines.length < 3) return match;
-      const headerCells = lines[0].split('|').slice(1, -1)
-        .map(c => `<th>${c.trim()}</th>`);
-      // lines[1] is the separator row -- skip it
-      const bodyRows = lines.slice(2).map(line => {
-        const cells = line.split('|').slice(1, -1)
-          .map(c => `<td>${c.trim()}</td>`);
-        return `<tr>${cells.join('')}</tr>`;
-      });
-      return `<table><thead><tr>${headerCells.join('')}</tr></thead>`
-        + `<tbody>${bodyRows.join('')}</tbody></table>`;
-    }
-  );
-  // Paragraphs
-  h = h.split('\n\n').map(p => {
-    p = p.trim();
-    if (!p) return '';
-    if (p.startsWith('<h') || p.startsWith('<ul') || p.startsWith('<table')) return p;
-    return `<p>${p.replace(/\n/g, '<br>')}</p>`;
-  }).join('');
-  return h;
+  return DOMPurify.sanitize(marked.parse(normalizeMarkdown(text)));
 }
 
 function esc(t) {
@@ -986,33 +965,51 @@ function clearBubbleStatus(msgDiv) {
   if (srStatus) srStatus.textContent = '';
 }
 
-let _rafPending = false;
-let _rafFullText = '';
-let _rafMsgDiv = null;
-let _rafCancelled = false;
+// Typewriter animation: smooths out Gemini's chunky streaming
+const _tw = { full: '', shown: 0, msgDiv: null, rafId: null, frame: 0, lastRendered: 0 };
 
-function updateBubbleContent(msgDiv, fullText) {
-  _rafFullText = fullText;
-  _rafMsgDiv = msgDiv;
-  if (!_rafPending) {
-    _rafPending = true;
-    requestAnimationFrame(() => {
-      _rafPending = false;
-      if (_rafCancelled) { _rafCancelled = false; return; }
-      const bubble = _rafMsgDiv.querySelector('.bubble');
-      // Preserve status-text if still present
-      const statusEl = bubble.querySelector('.status-text');
-      bubble.innerHTML = formatContent(_rafFullText);
-      if (statusEl) bubble.prepend(statusEl);
-      chatArea.scrollTop = chatArea.scrollHeight;
-    });
+function _twFrame() {
+  _tw.rafId = null;
+  if (!_tw.msgDiv || _tw.shown >= _tw.full.length) return;
+  // Adaptive speed: catch up faster when buffer is far ahead
+  const behind = _tw.full.length - _tw.shown;
+  const step = behind > 100 ? Math.ceil(behind / 10) : 12;
+  _tw.shown = Math.min(_tw.shown + step, _tw.full.length);
+  _tw.frame++;
+
+  // Run marked+DOMPurify every 3 frames (~20fps) instead of every frame (~60fps).
+  // Text still advances every frame; DOM updates less often - imperceptible at this speed.
+  const sinceLastRender = _tw.shown - _tw.lastRendered;
+  if (sinceLastRender >= 30 || _tw.shown === _tw.full.length) {
+    const bubble = _tw.msgDiv.querySelector('.bubble');
+    const statusEl = bubble.querySelector('.status-text');
+    bubble.innerHTML = formatContent(_tw.full.slice(0, _tw.shown));
+    if (statusEl) bubble.prepend(statusEl);
+    _tw.lastRendered = _tw.shown;
+    // Only scroll when content actually changes in DOM, and only if near bottom
+    const distFromBottom = chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight;
+    if (distFromBottom < 120) chatArea.scrollTop = chatArea.scrollHeight;
   }
+
+  _tw.rafId = requestAnimationFrame(_twFrame);
+}
+
+function twInit(msgDiv) {
+  if (_tw.rafId) cancelAnimationFrame(_tw.rafId);
+  _tw.full = ''; _tw.shown = 0; _tw.msgDiv = msgDiv; _tw.rafId = null; _tw.frame = 0; _tw.lastRendered = 0;
+}
+
+function twAppend(text) {
+  _tw.full += text;
+  if (_tw.rafId === null) _tw.rafId = requestAnimationFrame(_twFrame);
+}
+
+function twCancel() {
+  if (_tw.rafId) { cancelAnimationFrame(_tw.rafId); _tw.rafId = null; }
 }
 
 function finalizeBubble(msgDiv, fullText, sources, traceId) {
-  // Cancel any pending rAF from updateBubbleContent to prevent it
-  // from overwriting the finalized content with sources + feedback
-  _rafCancelled = true;
+  twCancel();
 
   const bubble = msgDiv.querySelector('.bubble');
   let html = formatContent(fullText);
@@ -1085,6 +1082,7 @@ async function handleSubmit(e) {
 
   addMessage('user', question);
   const msgDiv = createStreamingBubble();
+  twInit(msgDiv);
   updateBubbleStatus(msgDiv, 'Đang xử lý...');
 
   let streamSources = [];
@@ -1146,7 +1144,7 @@ async function handleSubmit(e) {
             statusCleared = true;
           }
           fullText += evt.data.text;
-          updateBubbleContent(msgDiv, fullText);
+          twAppend(evt.data.text);
         } else if (evt.type === 'done') {
           if (evt.data.session_id && !currentSessionId) {
             currentSessionId = evt.data.session_id;
