@@ -180,6 +180,52 @@ class TestRewriterPrompt:
         assert "dai tu" in REWRITER_SYSTEM_PROMPT.lower() or "pronoun" in REWRITER_SYSTEM_PROMPT.lower()
 
 
+class TestRewriterContextWindow:
+    """Verify recency-weighted assistant message truncation."""
+
+    def test_last_assistant_message_gets_1500_chars(self):
+        from app.rag.query_rewriter import _build_rewriter_prompt
+        long_response = "X" * 2000
+        messages = [
+            {"role": "user", "content": "question 1"},
+            {"role": "assistant", "content": long_response},
+        ]
+        prompt = _build_rewriter_prompt("follow up", summary=None, recent_messages=messages)
+        # Last assistant message should appear with up to 1500 chars
+        assert "X" * 1500 in prompt
+        assert "X" * 1501 not in prompt
+
+    def test_older_assistant_message_gets_400_chars(self):
+        from app.rag.query_rewriter import _build_rewriter_prompt
+        old_response = "Y" * 800
+        recent_response = "Z" * 100
+        messages = [
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": old_response},
+            {"role": "user", "content": "q2"},
+            {"role": "assistant", "content": recent_response},
+        ]
+        prompt = _build_rewriter_prompt("follow up", summary=None, recent_messages=messages)
+        # Older assistant message truncated to 400
+        assert "Y" * 400 in prompt
+        assert "Y" * 401 not in prompt
+        # Most recent assistant message kept in full (100 chars < 1500)
+        assert "Z" * 100 in prompt
+
+    def test_user_messages_not_truncated(self):
+        from app.rag.query_rewriter import _build_rewriter_prompt
+        long_user = "A" * 1000
+        messages = [{"role": "user", "content": long_user}]
+        prompt = _build_rewriter_prompt("follow up", summary=None, recent_messages=messages)
+        assert "A" * 1000 in prompt
+
+    def test_rewriter_system_prompt_has_ordinal_resolution_rule(self):
+        from app.rag.query_rewriter import REWRITER_SYSTEM_PROMPT
+        # Must instruct model to resolve ordinal references from history
+        lowered = REWRITER_SYSTEM_PROMPT.lower()
+        assert any(kw in lowered for kw in ["so thu tu", "ordinal", "truong hop", "muc"])
+
+
 class TestMultiQuerySearch:
     """Test that search_legal_docs handles multiple queries."""
 

@@ -83,8 +83,14 @@ NGUYEN TAC:
    Vi du: "den bu" -> "boi thuong khi Nha nuoc thu hoi dat"
    Vi du: "tach thua" -> "tach thua dat"
    Vi du: "hop thuc hoa" -> "cap giay chung nhan quyen su dung dat lan dau"
-3. TAO 2 CAU TRUY VAN THAY THE: Viet 2 cach dien dat khac nhau de tang kha nang tim kiem.
-4. TRICH XUAT BO LOC: Xac dinh van ban (doc_ids) va dieu (dieu) neu co trong cau hoi.
+3. GIAI QUYET SO THU TU: Neu nguoi dung nhac den "truong hop 1", "muc 3", "buoc 2",
+   "dieu do", hay so thu tu bat ky, hay tim chinh xac noi dung cua muc do trong
+   <lich-su> va dua noi dung thuc te vao standalone_query.
+   Vi du: user hoi "giai thich truong hop 3" va lich su co "3. Chi phi dau tu con lai..."
+   -> standalone_query: "Chi phi dau tu vao dat con lai duoc boi thuong khi Nha nuoc thu hoi dat"
+4. TAO 2 CAU TRUY VAN THAY THE: Viet 2 cach dien dat khac nhau de tang kha nang tim kiem.
+5. TRICH XUAT BO LOC: Xac dinh van ban (doc_ids) va dieu (dieu) neu co trong cau hoi.
+6. PHAM VI: Neu cau hoi KHONG lien quan den phap luat dat dai Viet Nam, tra ve is_in_scope: false va cac truong khac de trong.
 
 MA VAN BAN HOP LE:
 - ldd2024: Luat Dat Dai 2024
@@ -100,7 +106,8 @@ MA VAN BAN HOP LE:
 - nd50: Nghi dinh 50/2026 chi tiet NQ 254
 
 Tra ve CHINH XAC JSON (khong markdown, khong giai thich):
-{"standalone_query": "...", "search_queries": ["...", "..."], "filters": {"doc_ids": [...] hoac null, "dieu": "Dieu X" hoac null}}"""
+{"is_in_scope": true, "standalone_query": "...", "search_queries": ["...", "..."], "filters": {"doc_ids": [...] hoac null, "dieu": "Dieu X" hoac null}}
+Neu ngoai pham vi: {"is_in_scope": false, "standalone_query": "", "search_queries": [], "filters": {"doc_ids": null, "dieu": null}}"""
 
 
 def _build_rewriter_prompt(
@@ -114,9 +121,19 @@ def _build_rewriter_prompt(
         parts.append(f"<tom-tat-hoi-thoai>\n{summary}\n</tom-tat-hoi-thoai>")
     if recent_messages:
         history_lines = []
-        for msg in recent_messages[-10:]:  # last 5 turn-groups max
+        windowed = recent_messages[-10:]
+        # Find index of the last assistant message for recency-weighted truncation
+        last_asst_idx = max(
+            (i for i, m in enumerate(windowed) if m["role"] == "assistant"),
+            default=-1,
+        )
+        for i, msg in enumerate(windowed):
             role = "Nguoi dung" if msg["role"] == "user" else "Tro ly"
-            content = msg["content"][:300] if msg["role"] == "assistant" else msg["content"]
+            if msg["role"] == "assistant":
+                limit = 1500 if i == last_asst_idx else 400
+                content = msg["content"][:limit]
+            else:
+                content = msg["content"]
             history_lines.append(f"{role}: {content}")
         parts.append(f"<lich-su>\n" + "\n".join(history_lines) + "\n</lich-su>")
     parts.append(f"<cau-hoi-hien-tai>\n{user_message}\n</cau-hoi-hien-tai>")
@@ -126,6 +143,7 @@ def _build_rewriter_prompt(
 def parse_rewrite_response(raw: str, original_query: str) -> dict:
     """Parse LLM rewrite response into validated result. Falls back to original on failure."""
     fallback = {
+        "is_in_scope": True,
         "standalone_query": original_query,
         "search_queries": [],
         "filters": extract_filters_regex(original_query),
@@ -142,6 +160,10 @@ def parse_rewrite_response(raw: str, original_query: str) -> dict:
     except json.JSONDecodeError:
         logger.warning("Query rewriter returned invalid JSON: %s", raw[:200])
         return fallback
+
+    is_in_scope = data.get("is_in_scope", True)
+    if not is_in_scope:
+        return {"is_in_scope": False, "standalone_query": original_query, "search_queries": [], "filters": {"doc_ids": None, "dieu": None}}
 
     standalone = data.get("standalone_query", "").strip()
     if not standalone:
@@ -161,6 +183,7 @@ def parse_rewrite_response(raw: str, original_query: str) -> dict:
     })
 
     return {
+        "is_in_scope": True,
         "standalone_query": standalone,
         "search_queries": search_queries,
         "filters": filters,
@@ -185,7 +208,7 @@ async def rewrite_query(
                 system=REWRITER_SYSTEM_PROMPT,
                 model="utility",
                 temperature=0.0,
-                max_tokens=300,
+                max_tokens=500,
             ),
             timeout=5.0,
         )
@@ -200,6 +223,7 @@ async def rewrite_query(
         logger.error("Query rewriter failed: %s", e)
 
     return {
+        "is_in_scope": True,
         "standalone_query": user_message,
         "search_queries": [],
         "filters": extract_filters_regex(user_message),
