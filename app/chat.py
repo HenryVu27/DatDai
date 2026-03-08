@@ -592,7 +592,7 @@ async def handle_message_stream(session_id: str, user_message: str):
     turn = max((m["turn"] for m in history), default=0) + 1
     recent_messages, summary = await _assemble_conversation_context(history, session_id)
 
-    yield ("status", {"text": "Dang phan tich cau hoi...", "step": "orchestrator"})
+    yield ("status", {"text": random.choice(_STATUS_READING), "step": "orchestrator"})
 
     # -- Stage 0: Query rewriting --
     rewrite_result = await rewrite_query(user_message, summary, recent_messages)
